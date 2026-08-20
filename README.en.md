@@ -132,6 +132,38 @@ implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in fr
 
 ## 5. Quick start
 
+### Option A — Deploy from a Release (recommended, no .NET SDK needed)
+
+No source code or compilation required — download and run:
+
+1. Open the Releases page: <https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway/releases>
+2. Download the latest `gateway-net8.0-vX.Y.Z.zip` (for Windows Server 2019+ with the .NET 8
+   runtime installed; pick `gateway-net6.0-vX.Y.Z.zip` if the target machine only has .NET 6).
+3. Extract it anywhere (e.g. `C:\gateway`) — the zip is a complete publish folder (dll /
+   appsettings.json / web.config / wwwroot).
+4. (Optional) Config precheck, equivalent to `nginx -t`:
+
+   ```bash
+   cd C:\gateway
+   DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK
+   ```
+
+5. Start the gateway (Kestrel listens on http://localhost:5000 by default):
+
+   ```bash
+   cd C:\gateway
+   dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll
+   ```
+
+6. Open `http://localhost:5000/` — it should return the static home page
+   (`wwwroot/index.html`, 200).
+
+> Release packages are **framework-dependent**: the target machine needs the matching ASP.NET Core
+> Runtime (or the IIS Hosting Bundle); for production deployment under IIS see
+> [9. Publish to IIS].
+
+### Option B — Build from source (requires the .NET SDK)
+
 ```bash
 # 1) Enter the repo root (contains DotNet.Yarp.Reverse.Proxy.Gateway.slnx)
 cd DotNet.Nginx
@@ -149,19 +181,21 @@ dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
 
 Open `http://localhost:5000/` — it should return the static home page (`wwwroot/index.html`, 200).
 
-### Smoke test with the bundled script
+### Smoke test with the bundled script (works with either option)
 
-The repo ships a pure-PowerShell verification script (no 3rd-party deps) plus two Python smoke backends:
+The repo ships a pure-PowerShell verification script (no 3rd-party deps) plus two Python smoke
+backends. Users deploying from a Release should clone the repo (or download just the `scripts/`
+folder) to get these files:
 
 ```bash
 # Terminal A: start two smoke backends
 python scripts/echo_backend.py      # listens on 5200 (web-cluster)
 python scripts/redir_backend.py     # listens on 5101 (one api-cluster node, for Location-rewrite test)
 
-# Terminal B: start the gateway
+# Terminal B: start the gateway (Option A: run the dll from the extracted folder; Option B: dotnet run ...)
 dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
 
-# Terminal C: run verification
+# Terminal C: run verification (first make sure $Base in the script points to the gateway URL)
 pwsh scripts/verify.ps1
 ```
 

@@ -122,6 +122,35 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 
 ## 5. 快速开始
 
+### 方式一：从 Release 部署（推荐，无需 .NET SDK）
+
+无需源码与编译，直接从 GitHub Releases 下载即用：
+
+1. 打开 Releases 页：<https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway/releases>
+2. 下载最新版 `gateway-net8.0-vX.Y.Z.zip`（部署机为 Windows Server 2019+ 且已装 .NET 8 运行时；
+   若目标机只有 .NET 6，选 `gateway-net6.0-vX.Y.Z.zip`）。
+3. 解压到任意目录（如 `C:\gateway`）——包内为完整发布目录（dll / appsettings.json / web.config / wwwroot）。
+4. （可选）配置预检，等价 `nginx -t`：
+
+   ```bash
+   cd C:\gateway
+   DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK
+   ```
+
+5. 启动网关（Kestrel 默认监听 http://localhost:5000）：
+
+   ```bash
+   cd C:\gateway
+   dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll
+   ```
+
+6. 浏览器访问 `http://localhost:5000/` 应返回静态首页（`wwwroot/index.html`，200）。
+
+> Release 包为**框架依赖**，部署机需安装对应的 ASP.NET Core Runtime（或 IIS 用的 Hosting Bundle）；
+> 正式部署到 IIS 见 [9. 发布到 IIS]。
+
+### 方式二：从源码编译（需要 .NET SDK）
+
 ```bash
 # 1) 克隆 / 进入仓库根目录（含 DotNet.Yarp.Reverse.Proxy.Gateway.slnx）
 cd DotNet.Nginx
@@ -139,19 +168,20 @@ dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
 
 浏览器访问 `http://localhost:5000/` 应返回静态首页（`wwwroot/index.html`，200）。
 
-### 用脚本做冒烟验收
+### 用脚本做冒烟验收（两种方式均可）
 
-仓库内置纯 PowerShell 验收脚本（无第三方依赖），并附带两个 Python 冒烟后端：
+仓库内置纯 PowerShell 验收脚本（无第三方依赖），并附带两个 Python 冒烟后端。
+从 Release 部署的用户，先克隆仓库（或仅下载 `scripts/` 目录）即可获得这些脚本：
 
 ```bash
 # 终端 A：启动两个冒烟后端
 python scripts/echo_backend.py      # 监听 5200（web-cluster）
 python scripts/redir_backend.py     # 监听 5101（api-cluster 之一，用于 Location 改写验证）
 
-# 终端 B：启动网关
+# 终端 B：启动网关（方式一：在解压目录运行 dll；方式二：dotnet run ...）
 dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
 
-# 终端 C：运行验收
+# 终端 C：运行验收（先确认脚本中 $Base 指向网关地址）
 pwsh scripts/verify.ps1
 ```
 
