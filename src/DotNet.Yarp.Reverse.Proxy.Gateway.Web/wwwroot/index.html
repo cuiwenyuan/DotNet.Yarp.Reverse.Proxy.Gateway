@@ -2,14 +2,143 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DotNet.Yarp.Reverse.Proxy.Gateway</title>
+  <style>
+    :root {
+      --bg: #f5f8fc;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #185fa5;
+      --accent-soft: #e6f1fb;
+      --border: #e5e7eb;
+      --ok: #0f6e56;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    .container { max-width: 920px; margin: 0 auto; padding: 48px 24px 64px; }
+    header { text-align: center; margin-bottom: 40px; }
+    h1 { font-size: 30px; font-weight: 600; letter-spacing: -0.3px; }
+    .badges { margin-top: 14px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+    .badge {
+      display: inline-block; padding: 3px 12px; border-radius: 999px;
+      font-size: 12.5px; font-weight: 500; border: 1px solid var(--border);
+      background: var(--card);
+    }
+    .badge.dotnet { color: #512bd4; border-color: #c9c1f0; background: #f4f1ff; }
+    .badge.yarp { color: var(--accent); border-color: #b5d4f4; background: var(--accent-soft); }
+    .badge.mit { color: var(--ok); border-color: #b8e0d2; background: #e8f6f1; }
+    .hero {
+      background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+      padding: 32px 36px; text-align: center; margin-bottom: 28px;
+      box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06);
+    }
+    .hero .zh { font-size: 19px; font-weight: 600; }
+    .hero .en { font-size: 15px; color: var(--muted); margin-top: 8px; }
+    h2 { font-size: 16px; font-weight: 600; margin: 36px 0 16px; padding-left: 12px; border-left: 4px solid var(--accent); }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 20px 22px;
+    }
+    .card h3 { font-size: 15px; font-weight: 600; color: var(--accent); }
+    .card .zh { font-size: 13.5px; margin-top: 6px; }
+    .card .en { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+    table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    th, td { padding: 12px 18px; text-align: left; font-size: 13.5px; border-bottom: 1px solid var(--border); }
+    th { background: var(--accent-soft); color: var(--accent); font-weight: 600; white-space: nowrap; }
+    tr:last-child td { border-bottom: none; }
+    code { background: #eef2f6; border: 1px solid var(--border); border-radius: 5px; padding: 1px 7px; font-size: 12.5px; font-family: "Cascadia Code", Consolas, monospace; }
+    .github {
+      display: flex; align-items: center; gap: 14px; justify-content: space-between;
+      background: #0d1117; color: #fff; border-radius: 14px; padding: 22px 26px; margin: 32px 0;
+      text-decoration: none; transition: transform 0.15s ease;
+    }
+    .github:hover { transform: translateY(-2px); }
+    .github .gh-title { font-size: 15px; font-weight: 600; }
+    .github .gh-sub { font-size: 12.5px; color: #9ca3af; margin-top: 3px; word-break: break-all; }
+    .github .gh-btn {
+      flex-shrink: 0; background: #238636; color: #fff; padding: 8px 18px; border-radius: 8px;
+      font-size: 13px; font-weight: 600; white-space: nowrap;
+    }
+    .endpoints { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; }
+    .endpoints p { font-size: 13.5px; margin: 8px 0; }
+    footer { text-align: center; color: var(--muted); font-size: 12.5px; margin-top: 48px; }
+    .muted { color: var(--muted); font-size: 12.5px; }
+  </style>
 </head>
 <body>
-  <h1>.NET 反向代理网关（替代 nginx）</h1>
-  <p>本页面由网关的静态文件中间件直接托管（等价于 nginx 的 <code>location { root ... }</code>）。</p>
-  <ul>
-    <li><code>/api/*</code> → 转发到 api-cluster（负载均衡 + 健康检查）</li>
-    <li><code>/web/*</code> → 转发到 web-cluster</li>
-  </ul>
+  <div class="container">
+
+    <header>
+      <h1>DotNet.Yarp.Reverse.Proxy.Gateway</h1>
+      <div class="badges">
+        <span class="badge dotnet">.NET 6 / .NET 8</span>
+        <span class="badge yarp">YARP Reverse Proxy</span>
+        <span class="badge mit">MIT License</span>
+      </div>
+    </header>
+
+    <section class="hero">
+      <p class="zh">基于 .NET 的轻量级反向代理网关，在 Windows Server / IIS 下替代 nginx 核心能力</p>
+      <p class="en">A lightweight .NET reverse-proxy gateway replacing nginx's core capabilities under Windows Server / IIS</p>
+    </section>
+
+    <h2>核心能力 / Capabilities</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>转发与负载均衡 · Forwarding &amp; LB</h3>
+        <p class="zh">YARP 内核：路由、集群、健康检查、会话保持、加权负载、灰度分流</p>
+        <p class="en">YARP core: routes, clusters, health checks, session affinity, weighted LB, canary</p>
+      </div>
+      <div class="card">
+        <h3>入口治理 · Edge Governance</h3>
+        <p class="zh">限流（X-Rate-Limit-*）、熔断、重试、IP 黑白名单、请求体限制、JWT/API-Key 认证</p>
+        <p class="en">Rate limit, circuit breaker, retry, IP filter, body-size limit, JWT / API-Key auth</p>
+      </div>
+      <div class="card">
+        <h3>可观测性 · Observability</h3>
+        <p class="zh">Prometheus 指标、健康探针、管理端点、请求/响应日志（JSON 可选）</p>
+        <p class="en">Prometheus metrics, health probe, admin endpoints, request/response logging (JSON)</p>
+      </div>
+    </div>
+
+    <h2>代理路由 / Proxy Routes</h2>
+    <table>
+      <tr><th>路径 Path</th><th>目标集群 Target</th><th>前缀处理 Prefix</th></tr>
+      <tr><td><code>/api/*</code></td><td>api-cluster（负载均衡 + 健康检查）</td><td>剥离 <code>/api</code></td></tr>
+      <tr><td><code>/web/*</code></td><td>web-cluster</td><td>剥离 <code>/web</code></td></tr>
+      <tr><td><code>/</code></td><td>静态文件（本页）</td><td>——</td></tr>
+    </table>
+
+    <h2>仓库地址 / Repository</h2>
+    <a class="github" href="https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway" target="_blank" rel="noopener">
+      <div>
+        <div class="gh-title">GitHub · 源码与文档 / Source &amp; docs</div>
+        <div class="gh-sub">https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway</div>
+      </div>
+      <span class="gh-btn">View on GitHub →</span>
+    </a>
+
+    <h2>管理端点 / Admin Endpoints</h2>
+    <div class="endpoints">
+      <p><code>/metrics</code> — Prometheus 指标 / Prometheus metrics</p>
+      <p><code>/health</code> — 存活探针 / Liveness probe</p>
+      <p><code>/admin/status</code> — 运行状态 JSON / Runtime status JSON</p>
+      <p class="muted">本页面由网关静态文件中间件托管（等价 nginx <code>location { root }</code>）。
+        This page is served by the gateway's static-file middleware.</p>
+    </div>
+
+    <footer>
+      <p>DotNet.Yarp.Reverse.Proxy.Gateway · MIT License · Built on YARP &amp; .NET</p>
+    </footer>
+
+  </div>
 </body>
 </html>
