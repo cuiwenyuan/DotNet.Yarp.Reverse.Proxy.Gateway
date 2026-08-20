@@ -335,8 +335,8 @@ pipeline). `web.config` is copied on publish and configured for the inprocess ho
 
 ## 11. License & disclaimer
 
-This project is for demonstration and internal deployment, governed by the repository LICENSE. For
-production, please:
+This project is licensed under the **[MIT License](LICENSE)** (see the `LICENSE` file at the repo
+root) — free to use, modify, and redistribute. For production, please:
 
 - Move API keys / secrets out of config into a secret store or config center;
 - Disable `ProxyLogging:LogResponseBody` or limit `MaxBodyBytes` to avoid memory pressure on large responses;

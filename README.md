@@ -325,7 +325,8 @@ dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o
 
 ## 11. 许可证与免责声明
 
-本项目用于演示与内部部署，遵循仓库 LICENSE。生产环境请务必：
+本项目采用 **[MIT License](LICENSE)**（详见仓库根目录 `LICENSE` 文件），可自由使用、修改与分发。
+生产环境请务必：
 
 - 将 API Key / 密钥从配置中移出，改由密钥库或配置中心注入；
 - 关闭 `ProxyLogging:LogResponseBody` 或限制 `MaxBodyBytes` 以避免大响应占用内存；
