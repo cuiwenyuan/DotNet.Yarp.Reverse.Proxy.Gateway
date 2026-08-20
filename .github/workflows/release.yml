@@ -40,6 +40,10 @@ jobs:
     name: Publish & create GitHub Release
     needs: build
     runs-on: windows-latest
+    # 新仓库默认 Actions 的 GITHUB_TOKEN 为只读，必须显式声明 contents: write
+    # 才能创建 GitHub Release 并上传资产（否则 403 Resource not accessible）。
+    permissions:
+      contents: write
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
