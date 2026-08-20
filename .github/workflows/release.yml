@@ -67,12 +67,14 @@ jobs:
         run: >
           dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
           -c Release -f net8.0 -p:Version=${{ steps.version.outputs.version }}
+          -p:DebugType=none -p:DebugSymbols=false
           -o artifacts/net8.0
 
       - name: Publish net6.0 (framework-dependent)
         run: >
           dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
           -c Release -f net6.0 -p:Version=${{ steps.version.outputs.version }}
+          -p:DebugType=none -p:DebugSymbols=false
           -o artifacts/net6.0
 
       - name: Package zip
