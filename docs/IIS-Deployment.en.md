@@ -14,6 +14,13 @@ Server, using the **ASP.NET Core Module (ANCM)** in **inprocess** mode.
 
 ## 1. Prerequisites
 
+> **Supported range** (per the official .NET support matrix): **Windows Server 2012 / 2012 R2 and
+> later** — IIS 8.0 / 8.5 / 10; both the `net6.0` and `net8.0` packages are supported.
+> - Windows Server 2012 / 2012 R2 reached end of official support (Oct 2023; ESU can extend it).
+>   Prefer **2016+** for production; if you must deploy on 2012 / 2012 R2, also install the
+>   **Microsoft Visual C++ 2015-2019 Redistributable** (otherwise you may hit a missing
+>   `api-ms-win-crt-runtime-l1-1-0.dll`).
+
 ### 1.1 Install IIS
 
 Open **PowerShell as Administrator** and run:

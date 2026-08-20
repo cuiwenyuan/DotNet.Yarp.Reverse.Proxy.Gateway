@@ -118,7 +118,13 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 
 - **构建端**：安装 .NET 6 SDK 或 .NET 8 SDK（任一即可；双目标框架会同时产出 `net6.0` 与 `net8.0` 两个产物）。
 - **运行端**：部署机安装对应的 **ASP.NET Core Runtime 6 / 8**（或 IIS 用的 **.NET Core Hosting Bundle**）。
-- **操作系统**：Windows Server 2016+（IIS 托管）；也可在 Linux / macOS 以 Kestrel 自托管。
+- **操作系统**（依据 .NET 官方支持矩阵）：**Windows Server 2012 / 2012 R2 及以上**（IIS 8.0 / 8.5 / 10，
+  `net6.0` 与 `net8.0` 发布包均支持）；也可在 Windows 10 / 11 或 Linux / macOS 以 Kestrel 自托管。
+  - 最低版本 **Windows Server 2012 / 2012 R2** 需额外安装
+    **Microsoft Visual C++ 2015-2019 Redistributable**，否则可能报
+    `api-ms-win-crt-runtime-l1-1-0.dll` 缺失。
+  - 提醒：Windows Server 2012 / 2012 R2 官方支持已结束（2023-10，可用 ESU 续期），
+    有安全补丁诉求的生产环境建议 **2016+**。
 
 ## 5. 快速开始
 

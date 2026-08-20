@@ -14,6 +14,13 @@
 
 ## 1. 前置条件
 
+> **支持范围**（依据 .NET 官方支持矩阵）：**Windows Server 2012 / 2012 R2 及以上**——
+> 对应 IIS 8.0 / 8.5 / 10，`net6.0` 与 `net8.0` 发布包均支持。
+> - Windows Server 2012 / 2012 R2 已结束官方支持（2023-10，可用 ESU 续期），
+>   生产环境建议 **2016+**；如确需部署在 2012 / 2012 R2，请额外安装
+>   **Microsoft Visual C++ 2015-2019 Redistributable**（否则可能报
+>   `api-ms-win-crt-runtime-l1-1-0.dll` 缺失）。
+
 ### 1.1 安装 IIS
 
 以管理员身份打开 **PowerShell**，执行：

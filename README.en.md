@@ -128,7 +128,14 @@ implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in fr
   `net6.0` and `net8.0` artifacts).
 - **Runtime**: the target machine needs the corresponding **ASP.NET Core Runtime 6 / 8** (or the
   **.NET Core Hosting Bundle** for IIS).
-- **OS**: Windows Server 2016+ (IIS hosting); also self-hostable on Linux / macOS via Kestrel.
+- **OS** (per the official .NET support matrix): **Windows Server 2012 / 2012 R2 and later**
+  (IIS 8.0 / 8.5 / 10 — both the `net6.0` and `net8.0` packages are supported); Kestrel
+  self-hosting also works on Windows 10 / 11 and Linux / macOS.
+  - On the minimum **Windows Server 2012 / 2012 R2**, install the
+    **Microsoft Visual C++ 2015-2019 Redistributable** as well, or you may hit a missing
+    `api-ms-win-crt-runtime-l1-1-0.dll`.
+  - Note: Windows Server 2012 / 2012 R2 reached end of official support (Oct 2023; ESU can
+    extend it). For production environments that need security patches, prefer **2016+**.
 
 ## 5. Quick start
 
