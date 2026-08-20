@@ -38,7 +38,7 @@ Key facts of the source nginx site (sanitized):
 | --- | --- | --- |
 | `worker_processes` / `events.worker_connections` | Not needed | Kestrel manages connections by cores/system resources |
 | `server { listen 8080; listen 443 ssl; }` | IIS site bindings 8080 / 443 (same gateway process) | One process serves all ports; YARP routes are port-agnostic |
-| `server_name itemupc.waiglobal.com` | IIS binding host header / `AllowedHosts` | In production, set the domain in the IIS binding |
+| `server_name <production domain>` | IIS binding host header / `AllowedHosts` | In production, set the domain in the IIS binding |
 | `location / { root html; index }` | `UseFileServer` + `wwwroot/index.html` | Built-in |
 | `location /X/ { proxy_pass http://host:port/; }` | Route `X-route` + Cluster `X-cluster` + `PathRemovePrefix` | Trailing slash = prefix strip; equivalent |
 | `proxy_set_header Host $host` | YARP preserves the original Host by default | See difference ③ |
@@ -176,11 +176,14 @@ Key facts of the source nginx site (sanitized):
 
 ## Appendix: sanitization map
 
-| Original (source nginx.conf) | Used in this doc | Notes |
+> To protect production information, this table does not show the real values — it only describes
+> the sanitization rule and the mapped example values used in this document.
+
+| Original (sanitized description) | Used in this doc | Notes |
 | --- | --- | --- |
-| `itemupc.waiglobal.com` | `gw.example.com` | Domain |
-| `10.0.2.108` | `10.0.0.10` | Internal IP (example reserved range) |
-| `uspaexip02` | `backend-prod-01` | Internal hostname (production) |
-| `uspaexid02` | `backend-test-01` | Internal hostname (test) |
-| `D:\nginx-1.27.3\ssl\waiglobal.com.pem/.key` | `example.com.pem/.key` | Certificate path |
+| Production domain (real value sanitized) | `gw.example.com` | Domain |
+| Internal IP | `10.0.0.10` | Example reserved range |
+| Production backend hostname | `backend-prod-01` | Internal hostname (production) |
+| Test backend hostname | `backend-test-01` | Internal hostname (test) |
+| Certificate path (real value sanitized) | `example.com.pem/.key` | Certificate path |
 | Ports `8080 / 443 / 802 / 801 / 6012` | kept as-is | Ports are not identity data; kept for comparison |

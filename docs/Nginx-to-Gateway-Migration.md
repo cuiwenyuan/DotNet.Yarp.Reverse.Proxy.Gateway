@@ -36,7 +36,7 @@
 | --- | --- | --- |
 | `worker_processes` / `events.worker_connections` | 无需配置 | Kestrel 自动按内核数/系统资源管理连接 |
 | `server { listen 8080; listen 443 ssl; }` | IIS 站点绑定 8080 / 443（同一网关进程） | 一个进程服务所有端口，YARP 路由不分端口 |
-| `server_name itemupc.waiglobal.com` | IIS 站点绑定主机头 / `AllowedHosts` | 生产建议在 IIS 绑定填写域名 |
+| `server_name <生产域名>` | IIS 站点绑定主机头 / `AllowedHosts` | 生产建议在 IIS 绑定填写域名 |
 | `location / { root html; index }` | `UseFileServer` + `wwwroot/index.html` | 已内置 |
 | `location /X/ { proxy_pass http://host:port/; }` | Route `X-route` + Cluster `X-cluster` + `PathRemovePrefix` | 尾斜杠 = 前缀剥离，二者等价 |
 | `proxy_set_header Host $host` | YARP 默认保留原始 Host | 见差异点 ③ |
@@ -169,11 +169,13 @@
 
 ## 附录：脱敏对照
 
-| 原文（源 nginx.conf） | 本文档使用 | 说明 |
+> 为保护生产环境信息，本对照表不展示真实值，仅说明脱敏规则与映射后的示例值。
+
+| 原文（已脱敏描述） | 本文档使用 | 说明 |
 | --- | --- | --- |
-| `itemupc.waiglobal.com` | `gw.example.com` | 域名 |
-| `10.0.2.108` | `10.0.0.10` | 内网 IP（示例保留地址） |
-| `uspaexip02` | `backend-prod-01` | 内网主机名（生产） |
-| `uspaexid02` | `backend-test-01` | 内网主机名（测试） |
-| `D:\nginx-1.27.3\ssl\waiglobal.com.pem/.key` | `example.com.pem/.key` | 证书路径 |
+| 生产域名（真实值已脱敏） | `gw.example.com` | 域名 |
+| 内网 IP | `10.0.0.10` | 示例保留地址 |
+| 生产后端主机名 | `backend-prod-01` | 内网主机名（生产） |
+| 测试后端主机名 | `backend-test-01` | 内网主机名（测试） |
+| 证书路径（真实值已脱敏） | `example.com.pem/.key` | 证书路径 |
 | 端口 `8080 / 443 / 802 / 801 / 6012` | 保留原值 | 端口非身份信息，保留便于对照 |
