@@ -134,7 +134,7 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 
    ```bash
    cd C:\gateway
-   DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK
+   dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK
    ```
 
 5. 启动网关（Kestrel 默认监听 http://localhost:5000）：
@@ -160,7 +160,7 @@ dotnet build -c Release
 
 # 2.1) 配置预检（可选，等价 nginx -t）：校验路由/集群唯一性与后端地址合法性
 dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o publish
-./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK
+dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK
 
 # 3) 启动网关（Kestrel 默认监听 http://localhost:5000）
 dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web

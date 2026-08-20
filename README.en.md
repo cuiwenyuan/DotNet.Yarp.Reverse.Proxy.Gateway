@@ -145,7 +145,7 @@ No source code or compilation required — download and run:
 
    ```bash
    cd C:\gateway
-   DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK
+   dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK
    ```
 
 5. Start the gateway (Kestrel listens on http://localhost:5000 by default):
@@ -173,7 +173,7 @@ dotnet build -c Release
 
 # 2.1) Config precheck (optional, like `nginx -t`): validates route/cluster uniqueness and backend addresses
 dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o publish
-./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK
+dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK
 
 # 3) Run the gateway (Kestrel listens on http://localhost:5000 by default)
 dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web

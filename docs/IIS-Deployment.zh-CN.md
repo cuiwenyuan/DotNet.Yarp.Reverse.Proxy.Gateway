@@ -79,7 +79,7 @@ dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o
 ```bash
 # 在发布目录内执行
 cd "C:\inetpub\wwwroot\gateway"
-DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK 即通过
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK 即通过
 ```
 
 > `--test-config` 只校验配置后退出，不会启动监听端口；也可以放在 CI/CD 发布流水线里作为门禁。

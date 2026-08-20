@@ -33,7 +33,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o "$env:RUNNER_TEMP\precheck"
-          & "$env:RUNNER_TEMP\precheck\DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll" --test-config
+          dotnet "$env:RUNNER_TEMP\precheck\DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll" --test-config
 
   # ---------- Job 2：发版（依赖 Job 1 通过；仅 tag 触发时执行） ----------
   release:

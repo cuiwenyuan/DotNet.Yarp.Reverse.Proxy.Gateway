@@ -81,7 +81,7 @@ only at runtime:
 ```bash
 # Run inside the publish folder
 cd "C:\inetpub\wwwroot\gateway"
-DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK on success
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK on success
 ```
 
 > `--test-config` validates and exits without opening a listening port; it can also be used as a gate
