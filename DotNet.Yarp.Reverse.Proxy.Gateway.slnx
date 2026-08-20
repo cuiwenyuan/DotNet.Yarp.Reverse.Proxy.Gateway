@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DotNet.Yarp.Reverse.Proxy.Gateway.Core/DotNet.Yarp.Reverse.Proxy.Gateway.Core.csproj" />
+    <Project Path="src/DotNet.Yarp.Reverse.Proxy.Gateway.Web/DotNet.Yarp.Reverse.Proxy.Gateway.Web.csproj" />
+  </Folder>
+</Solution>

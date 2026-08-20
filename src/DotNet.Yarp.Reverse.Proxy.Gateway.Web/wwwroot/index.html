@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>DotNet.Nginx Gateway</title>
+</head>
+<body>
+  <h1>.NET 反向代理网关（替代 nginx）</h1>
+  <p>本页面由网关的静态文件中间件直接托管（等价于 nginx 的 <code>location { root ... }</code>）。</p>
+  <ul>
+    <li><code>/api/*</code> → 转发到 api-cluster（负载均衡 + 健康检查）</li>
+    <li><code>/web/*</code> → 转发到 web-cluster</li>
+  </ul>
+</body>
+</html>

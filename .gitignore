@@ -1,0 +1,22 @@
+# ---------- .NET build outputs ----------
+bin/
+obj/
+publish/
+*.user
+
+# ---------- Visual Studio ----------
+.vs/
+*.suo
+*.userprefs
+
+# ---------- Logs ----------
+Log/
+*.log
+
+# ---------- WorkBuddy local workspace data (memory, session state — keep private) ----------
+.workbuddy/
+
+# ---------- OS files ----------
+Thumbs.db
+.DS_Store
+Desktop.ini

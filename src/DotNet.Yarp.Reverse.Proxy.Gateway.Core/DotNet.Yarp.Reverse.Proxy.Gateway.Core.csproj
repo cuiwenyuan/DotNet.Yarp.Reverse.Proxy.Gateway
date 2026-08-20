@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 同时支持 .NET 6 与 .NET 8（双目标框架） -->
+    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- 允许使用 C# 12 语法（struct 主构造函数等）在双目标下编译 -->
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 唯一允许的第三方 NuGet：NewLife.Core（日志/配置/缓存/序列化基础设施） -->
+    <PackageReference Include="NewLife.Core" Version="11.18.2026.801" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ASP.NET Core 共享框架引用（FrameworkReference，非第三方 NuGet）：
+         提供 HttpContext / RequestDelegate / 中间件等 BCL+框架类型。
+         这是编写 ASP.NET Core 中间件的标准做法，不引入任何第三方包。 -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>
