@@ -14,6 +14,58 @@
 CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS 下的反向代理入口，把"转发 + 治理"收拢到
 同一个进程、同一套代码与配置里，并可在修改 `appsettings.json` 后**热加载**（等价 `nginx -s reload`）。
 
+### Windows 上部署 nginx 的常见问题（官方事实）
+
+> 依据 [nginx for Windows 官方文档](https://nginx.org/en/docs/windows.html)（官方明确 Windows 版为
+> **beta 版本**）与 nginx 官方核心开发者邮件整理，非社区传言。
+
+**A. 官方定位与性能限制**
+
+| 问题 | 说明 |
+| --- | --- |
+| 高性能不可期待 | Windows 版仅用 `select()`/`poll()` 事件模型，官方原文 "high performance and scalability should not be expected" |
+| 多 worker 形同虚设 | 可配置多个 worker，但只有一个实际处理连接，无法利用多核 |
+| 单 worker 连接受限 | `select()` 模型下 1024 连接硬上限；`poll()`（1.15.9+）无硬上限但存在 WSAPoll 缺陷 |
+| 不支持 sendfile | 静态文件走用户态拷贝，大文件 / 高并发吞吐低于 Linux |
+| 官方不建议生产 | 核心开发者原文：Running nginx on Windows in production setups might not be a good idea |
+
+**B. 功能缺失（Windows 版）**
+
+| 问题 | 说明 |
+| --- | --- |
+| 缓存不可用 | `proxy_cache` 等依赖共享内存的模块在 Windows（ASLR）上不工作 |
+| 不支持 UDP / QUIC | Windows 版无 UDP 代理能力 |
+| 缺少部分模块 | XSLT 过滤、图片过滤、GeoIP、内嵌 Perl 等缺失 |
+
+**C. 部署与运维痛点**
+
+| 问题 | 说明 |
+| --- | --- |
+| 非 Windows 服务 | 以控制台程序运行：开机不自启、崩溃不自动拉起，需 WinSW / NSSM 等第三方工具注册服务 |
+| 配置易错难查 | C 风格语法、路径须 UNIX 正斜杠、相对路径以运行目录为前缀；改错配置 reload 即中断服务 |
+| 443/80 端口被占用 | 常被 IIS 默认站点、Skype、其他 Web 服务、WSL2 / Docker 抢占；nginx 启动失败只写 error.log，排障依赖 `netstat` 查 PID，且与 IIS 同端口冲突频繁 |
+| 二进制维护 | 升级需手动下载替换；部分杀毒软件对 nginx.exe 误报 |
+| 无内置监控 | `stub_status` 需编译进模块（官方 Windows 版不含）；日志为纯文本 access_log，与集中日志体系割裂 |
+| 无管理 API | 开源版无动态配置 / 管理端点，灰度、限流调整都需改文件 reload |
+
+**D. 生态割裂（.NET 团队视角）**
+
+配置与 .NET 代码 / CI/CD / 密钥管理割裂，团队学习成本高，难以纳入统一运维体系。
+
+### 本系统如何对应解决
+
+| nginx 痛点 | 本系统方案 |
+| --- | --- |
+| 性能 / 扩展性受限 | .NET 异步模型 + YARP，IIS / ANCM 托管，多核原生利用 |
+| 不支持 sendfile | Kestrel / IIS 原生内核传输（ANCM inprocess） |
+| 缓存不可用 | 自研 `ResponseCacheMiddleware` 内存缓存（`proxy_cache` 等价） |
+| 非服务化 | IIS 应用池托管：开机自启、崩溃自动回收重启 |
+| 端口被占用 / 与 IIS 抢 443 | 网关即 IIS 托管，不存在 nginx 与 IIS 抢端口的场景；443 绑定由 IIS 统一管理、冲突可视化 |
+| 配置易错 | `--test-config` 预检（等价 `nginx -t`）+ `POST /admin/reload` 在线热重载 |
+| 无内置监控 | `/metrics`（Prometheus）+ `/health` + `/admin/status` |
+| 无管理 API | `/admin/status` + `/admin/reload` 管理端点 |
+| 生态割裂 | 纯 .NET：与 CI/CD、密钥库、日志体系同生态 |
+
 ## 2. 功能特性
 
 | 能力 | 说明 | 等价 nginx |

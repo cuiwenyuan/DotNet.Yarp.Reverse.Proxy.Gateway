@@ -18,6 +18,60 @@ implements a .NET-native reverse-proxy entry point that can be hosted inside IIS
 "forwarding + governance" into a single process, one codebase, and one configuration file — and it
 supports **hot reload** after editing `appsettings.json` (equivalent to `nginx -s reload`).
 
+### Common problems running nginx on Windows (official facts)
+
+> Compiled from the [nginx for Windows docs](https://nginx.org/en/docs/windows.html) (the official
+> docs state the Windows build is **beta quality**) and statements from nginx core developers — not
+> community hearsay.
+
+**A. Official positioning & performance limits**
+
+| Problem | Details |
+| --- | --- |
+| Performance not expected | The Windows build uses only `select()`/`poll()`; official wording: "high performance and scalability should not be expected" |
+| Multiple workers are useless | You can configure several workers, but only one actually handles connections — no multi-core benefit |
+| Per-worker connection cap | `select()` had a hard 1024-connection limit; `poll()` (1.15.9+) removes it but has WSAPoll defects |
+| No sendfile | Static files go through user-mode copies; lower throughput on large files / high concurrency than Linux |
+| Not recommended for production | Core developer: "Running nginx on Windows in production setups might not be a good idea" |
+
+**B. Missing functionality (Windows build)**
+
+| Problem | Details |
+| --- | --- |
+| No caching | Modules that need shared memory (`proxy_cache` etc.) do not work on Windows (ASLR) |
+| No UDP / QUIC | No UDP proxying in the Windows build |
+| Missing modules | XSLT filter, image filter, GeoIP, embedded Perl, etc. |
+
+**C. Deployment & operations pain points**
+
+| Problem | Details |
+| --- | --- |
+| Not a Windows service | Runs as a console app: no auto-start on boot, no auto-restart on crash; needs WinSW / NSSM or similar to register a service |
+| Fragile configuration | C-style syntax, UNIX-style forward-slash paths, relative paths based on the run directory; a bad edit breaks the service on `reload` |
+| Port 443/80 already in use | Often taken by the IIS default site, Skype, other web servers, WSL2 / Docker; nginx fails silently (only an error.log line), debugging means `netstat` + PID hunting, and conflicts with IIS on the same port are frequent |
+| Native binary upkeep | Manual download/replace for upgrades; some antivirus products flag nginx.exe |
+| No built-in monitoring | `stub_status` must be compiled in (absent from the official Windows build); plain-text `access_log` only, disconnected from centralized logging |
+| No management API | No dynamic config / admin endpoints in the open-source build; canary, rate-limit and other changes require editing files and reloading |
+
+**D. Ecosystem split (.NET team perspective)**
+
+nginx config is disconnected from .NET code, CI/CD and secret management — a higher learning curve
+and hard to fold into one unified operations system.
+
+### How this gateway addresses each problem
+
+| nginx pain point | This gateway |
+| --- | --- |
+| Performance / scalability limits | .NET async model + YARP, hosted by IIS / ANCM, native multi-core use |
+| No sendfile | Kestrel / IIS kernel-level transfer (ANCM inprocess) |
+| No caching | Self-built `ResponseCacheMiddleware` in-memory cache (proxy_cache equivalent) |
+| Not a service | IIS app-pool hosting: auto-start on boot, auto-recycle on crash |
+| Port 443 taken / conflicts with IIS | The gateway IS an IIS-hosted app — there is no nginx-vs-IIS port conflict; the 443 binding is managed and visualized by IIS |
+| Fragile configuration | `--test-config` precheck (like `nginx -t`) + `POST /admin/reload` online hot reload |
+| No monitoring | `/metrics` (Prometheus) + `/health` + `/admin/status` |
+| No management API | `/admin/status` + `/admin/reload` admin endpoints |
+| Ecosystem split | Pure .NET: same ecosystem as CI/CD, secret stores, and logging |
+
 ## 2. Features
 
 | Capability | Description | nginx equivalent |
