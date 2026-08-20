@@ -323,7 +323,43 @@ dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o
 - 若仅需其中一个运行时，发布时指定 `-f` 即可（如 `-f net8.0`）。
 - 日志目录：运行时在 `publish/Log`（或 `bin/Release/<tfm>/Log`）下生成 XTrace 日志。
 
-## 11. 许可证与免责声明
+## 11. 版本与自动发版
+
+### 版本号（SemVer，单一来源）
+
+版本号由 **Git tag 驱动**：日常开发版本写在根目录
+[`Directory.Build.props`](Directory.Build.props) 的 `VersionPrefix`（当前 `1.0.0`）；发版时由
+GitHub Actions 用 `-p:Version=<tag 版本>` 注入覆盖，本地无需额外维护，杜绝两处不同步。
+
+- 程序集版本：`AssemblyVersion / FileVersion` = 版本号。
+- 信息版本：`InformationalVersion` = 版本号 + Git commit（如 `1.0.0+6a44d70`），
+  `/admin/status` 的 `version` 字段直接可见，便于线上对账。
+
+### 发版流程（GitHub Actions 自动）
+
+```bash
+# 提交代码后，打 tag 并推送（版本号 = tag 去掉 v 前缀）
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+推送 `v*` tag 后，[`release.yml`](.github/workflows/release.yml) 自动执行：
+
+1. **构建门禁**：net6.0 + net8.0 双框架 `dotnet build -c Release`，0 错误；
+2. **配置预检门禁**：`--test-config`（等价 `nginx -t`），失败即中止；
+3. **发布打包**：publish net6.0 / net8.0（框架依赖）→
+   `gateway-net8.0-v1.0.0.zip`、`gateway-net6.0-v1.0.0.zip`；
+4. **创建 Release**：上传两个 zip + 自动生成 release notes（tag 间 commits）。
+
+### 部署产物
+
+zip 内为完整发布目录（dll / appsettings.json / web.config / wwwroot），**解压到 IIS 站点目录即
+完成部署**；部署机需安装对应 ASP.NET Core Runtime / Hosting Bundle（框架依赖）。
+
+> 手动触发（不推 tag）：GitHub Actions 页面 → Release workflow → **Run workflow**，
+> 仅执行构建 + 预检门禁，用于日常验证。
+
+## 12. 许可证与免责声明
 
 本项目采用 **[MIT License](LICENSE)**（详见仓库根目录 `LICENSE` 文件），可自由使用、修改与分发。
 生产环境请务必：

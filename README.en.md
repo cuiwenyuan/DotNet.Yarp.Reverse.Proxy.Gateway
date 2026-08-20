@@ -333,7 +333,45 @@ pipeline). `web.config` is copied on publish and configured for the inprocess ho
 - To target a single runtime, specify `-f` on publish (e.g. `-f net8.0`).
 - Log directory: XTrace logs are written under `publish/Log` (or `bin/Release/<tfm>/Log`).
 
-## 11. License & disclaimer
+## 11. Versioning & automated releases
+
+### Version number (SemVer, single source of truth)
+
+The version is **driven by Git tags**: the development version lives in
+[`Directory.Build.props`](Directory.Build.props) at the repo root under `VersionPrefix`
+(currently `1.0.0`); on release, GitHub Actions overrides it via `-p:Version=<tag version>`, so
+nothing has to be maintained locally and the two can never drift apart.
+
+- Assembly version: `AssemblyVersion / FileVersion` = the version number.
+- Informational version: `InformationalVersion` = version + Git commit (e.g. `1.0.0+6a44d70`),
+  visible in the `version` field of `/admin/status` for production reconciliation.
+
+### Release flow (automatic via GitHub Actions)
+
+```bash
+# After committing, create a tag and push (version = tag without the leading "v")
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Pushing a `v*` tag triggers [`release.yml`](.github/workflows/release.yml) automatically:
+
+1. **Build gate**: dual-TFM `dotnet build -c Release` (net6.0 + net8.0), zero errors;
+2. **Config precheck gate**: `--test-config` (equivalent to `nginx -t`), abort on failure;
+3. **Publish & package**: publish net6.0 / net8.0 (framework-dependent) →
+   `gateway-net8.0-v1.0.0.zip`, `gateway-net6.0-v1.0.0.zip`;
+4. **Create Release**: upload both zips + auto-generated release notes (commits since last tag).
+
+### Deployment artifact
+
+Each zip contains the complete publish folder (dll / appsettings.json / web.config / wwwroot) —
+**extract it into the IIS site folder to deploy**. The target machine needs the matching ASP.NET
+Core Runtime / Hosting Bundle (framework-dependent).
+
+> Manual trigger (no tag): GitHub Actions → Release workflow → **Run workflow** — runs only the
+> build + precheck gates for everyday validation.
+
+## 12. License & disclaimer
 
 This project is licensed under the **[MIT License](LICENSE)** (see the `LICENSE` file at the repo
 root) — free to use, modify, and redistribute. For production, please:
