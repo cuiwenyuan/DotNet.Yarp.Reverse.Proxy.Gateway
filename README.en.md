@@ -136,6 +136,20 @@ implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in fr
     `api-ms-win-crt-runtime-l1-1-0.dll`.
   - Note: Windows Server 2012 / 2012 R2 reached end of official support (Oct 2023; ESU can
     extend it). For production environments that need security patches, prefer **2016+**.
+- **Local dev & testing on Windows 10 / 11**: both .NET 6 and .NET 8 are supported; three ways to
+  run —
+  1. **Kestrel direct (recommended)**: `dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web`
+     (or extract a Release package and run `dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll`).
+     The SDK ships the runtime; works on every Windows 10/11 edition; default
+     `http://localhost:5000`. Use this for everyday development and quick checks.
+  2. **IIS Express**: used automatically by Visual Studio (F5) — handy for debugging
+     `web.config` (ANCM) behavior.
+  3. **Local IIS**: enable the "Internet Information Services" feature to get the closest
+     production match (app pools / bindings / certs). Note: **the IIS feature is only available on
+     Windows 10/11 Pro / Enterprise / Education** — Home edition has no IIS; use option 1 or 2.
+  > Tip: Kestrel direct run bypasses IIS, so the ANCM settings in `web.config` don't apply, but YARP
+  > and all governance features behave identically. Before going live, verify with `--test-config`
+  > plus option 3 (or the target server's IIS).
 
 ## 5. Quick start
 

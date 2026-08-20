@@ -125,6 +125,16 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
     `api-ms-win-crt-runtime-l1-1-0.dll` 缺失。
   - 提醒：Windows Server 2012 / 2012 R2 官方支持已结束（2023-10，可用 ESU 续期），
     有安全补丁诉求的生产环境建议 **2016+**。
+- **开发本机测试（Windows 10 / 11）**：.NET 6 / 8 均支持，三种跑法——
+  1. **Kestrel 直跑（推荐）**：`dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web`
+     （或解压 Release 包后 `dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll`），SDK 自带 runtime，
+     Win10/11 全版本可用，默认 `http://localhost:5000`；日常开发/快速验证用这个即可。
+  2. **IIS Express**：Visual Studio 按 F5 自动使用，适合调试 `web.config`（ANCM）相关行为。
+  3. **本机 IIS**：控制面板启用"Internet Information Services"功能，最接近生产
+     （应用池/绑定/证书）；注意 **IIS 功能仅 Win10/11 Pro / Enterprise / Education 版提供**，
+     Home 版无 IIS，请用方式 1 或 2。
+  > 提示：Kestrel 直跑不走 IIS，`web.config` 的 ANCM 配置不生效，但 YARP 与全部治理功能一致；
+  > 上线前用 `--test-config` 预检 + 方式 3（或目标服务器 IIS）做最终验证。
 
 ## 5. 快速开始
 
