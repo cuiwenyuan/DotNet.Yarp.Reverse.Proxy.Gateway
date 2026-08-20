@@ -1,6 +1,7 @@
-# DotNet.Nginx 网关验收脚本（纯 PowerShell，无第三方依赖）
+# DotNet.Yarp.Reverse.Proxy.Gateway 网关验收脚本（纯 PowerShell，无第三方依赖）
 # 前提：网关已在本地以 dotnet run 启动，监听 http://localhost:5000
-# 用法：在 YarpGateway 目录下执行  dotnet run  后，另开终端运行  pwsh scripts/verify.ps1
+# 用法：在仓库根目录下执行  dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web  后，
+#       另开终端运行  pwsh scripts/verify.ps1
 
 $Base = 'http://localhost:5000'
 $failed = 0
@@ -17,7 +18,7 @@ function Check($name, $url, $expectStatus) {
     }
 }
 
-Write-Host "=== DotNet.Nginx 验收开始 ($Base) ==="
+Write-Host "=== Gateway 验收开始 ($Base) ==="
 
 # 1) 静态文件托管（等价 nginx root）
 Check 'static-index' "$Base/" 200

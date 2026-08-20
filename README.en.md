@@ -186,8 +186,8 @@ No source code or compilation required — download and run:
 ### Option B — Build from source (requires the .NET SDK)
 
 ```bash
-# 1) Enter the repo root (contains DotNet.Yarp.Reverse.Proxy.Gateway.slnx)
-cd DotNet.Nginx
+# 1) Enter the repo root (folder name = repo name, contains DotNet.Yarp.Reverse.Proxy.Gateway.slnx)
+cd DotNet.Yarp.Reverse.Proxy.Gateway
 
 # 2) Restore and build (dual-targeting, Release)
 dotnet build -c Release
@@ -223,7 +223,7 @@ pwsh scripts/verify.ps1
 ## 6. Project structure
 
 ```
-DotNet.Nginx/
+DotNet.Yarp.Reverse.Proxy.Gateway/   # Repo root (local work dir may be named DotNet.Nginx; same code)
 ├── DotNet.Yarp.Reverse.Proxy.Gateway.slnx   # Solution
 ├── src/
 │   ├── DotNet.Yarp.Reverse.Proxy.Gateway.Core/   # Class library: self-built governance (BCL + NewLife.Core)

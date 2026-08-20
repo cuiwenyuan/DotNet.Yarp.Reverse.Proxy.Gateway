@@ -168,8 +168,8 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 ### 方式二：从源码编译（需要 .NET SDK）
 
 ```bash
-# 1) 克隆 / 进入仓库根目录（含 DotNet.Yarp.Reverse.Proxy.Gateway.slnx）
-cd DotNet.Nginx
+# 1) 克隆 / 进入仓库根目录（目录名 = 仓库名，含 DotNet.Yarp.Reverse.Proxy.Gateway.slnx）
+cd DotNet.Yarp.Reverse.Proxy.Gateway
 
 # 2) 还原并构建（双目标框架，Release）
 dotnet build -c Release
@@ -204,7 +204,7 @@ pwsh scripts/verify.ps1
 ## 6. 项目结构
 
 ```
-DotNet.Nginx/
+DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能为 DotNet.Nginx，二者同代码）
 ├── DotNet.Yarp.Reverse.Proxy.Gateway.slnx   # 解决方案
 ├── src/
 │   ├── DotNet.Yarp.Reverse.Proxy.Gateway.Core/   # 类库：自研治理组件（纯 BCL + NewLife.Core）

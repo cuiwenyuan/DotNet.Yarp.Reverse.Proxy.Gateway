@@ -20,8 +20,9 @@ A **single-process, single-config-file** reverse-proxy gateway that replaces ngi
 - **Forwarding core**: Microsoft's official **YARP** (Yet Another Reverse Proxy) — route matching,
   cluster selection, load balancing, health checks, connection pooling, and protocol pass-through
   (HTTP/1.1, HTTP/2, WebSocket, gRPC).
-- **Governance**: all handled by self-built middleware in the `Gateway.Core` library (rate limiting,
-  auth, circuit breaking, retry, IP filtering, caching, security headers, logging, metrics) — no
+- **Governance**: all handled by self-built middleware in the
+  `DotNet.Yarp.Reverse.Proxy.Gateway.Core` library (Gateway.Core for short below) — rate limiting,
+  auth, circuit breaking, retry, IP filtering, caching, security headers, logging, metrics — no
   third-party gateway components.
 - **Configuration**: a single `appsettings.json` with two top-level nodes: `ReverseProxy` (YARP
   contract) and `Gateway` (self-built governance); hot reload supported (see section 7).

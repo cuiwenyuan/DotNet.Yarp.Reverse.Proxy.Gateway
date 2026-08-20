@@ -17,8 +17,9 @@
 - **部署形态**：默认架在 IIS 之后（ASP.NET Core Module，inprocess），也可 Kestrel 自托管。
 - **转发内核**：微软官方 YARP（Yet Another Reverse Proxy）——负责路由匹配、集群选择、负载均衡、
   健康检查、连接池与协议透传（HTTP/1.1、HTTP/2、WebSocket、gRPC）。
-- **治理能力**：全部由 `Gateway.Core` 类库中的自研中间件承担（限流、认证、熔断、重试、IP 过滤、
-  缓存、安全头、日志、指标等），不依赖第三方网关组件。
+- **治理能力**：全部由 `DotNet.Yarp.Reverse.Proxy.Gateway.Core` 类库（下文简称 Gateway.Core）中的
+  自研中间件承担（限流、认证、熔断、重试、IP 过滤、缓存、安全头、日志、指标等），不依赖第三方
+  网关组件。
 - **配置**：单一 `appsettings.json`，内含 `ReverseProxy`（YARP 契约）与 `Gateway`（自研治理）两个
   顶级节点；支持热加载（见第 7 节）。
 
