@@ -1,0 +1,24 @@
+<Project>
+
+  <!--
+    版本号单一来源（SemVer）。
+    日常开发：直接改 VersionPrefix（如 1.1.0）；CI 发版时由 GitHub Actions 用
+    -p:Version=<tag版本> 覆盖，本地无需维护，避免两处不同步。
+  -->
+  <PropertyGroup>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionSuffix></VersionSuffix>
+    <InformationalVersion>$(VersionPrefix)$(VersionSuffix)</InformationalVersion>
+  </PropertyGroup>
+
+  <!-- 程序集元数据（两项目共享） -->
+  <PropertyGroup>
+    <Authors>Troy Cui</Authors>
+    <Company>Troy Cui</Company>
+    <Product>DotNet.Yarp.Reverse.Proxy.Gateway</Product>
+    <Description>.NET reverse-proxy gateway replacing nginx core on Windows Server (YARP + self-built governance)</Description>
+    <RepositoryUrl>https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+</Project>
