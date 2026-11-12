@@ -12,27 +12,28 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  # ---------- Job 1：构建门禁（双框架 0 错误 + 配置预检） ----------
+  # ---------- Job 1：构建门禁（net6.0/net8.0/net10.0 三框架 0 错误 + 配置预检） ----------
   build:
-    name: Build & verify (dual TFM)
+    name: Build & verify (net6.0 / net8.0 / net10.0)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup .NET 6 & 8
+      - name: Setup .NET 6, 8 & 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
             6.0.x
             8.0.x
+            10.0.x
 
-      - name: Restore & build (Release, net6.0 + net8.0)
+      - name: Restore & build (Release, net6.0 + net8.0 + net10.0)
         run: dotnet build -c Release
 
       - name: Config precheck (--test-config, equivalent to nginx -t)
         shell: pwsh
         run: |
-          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o "$env:RUNNER_TEMP\precheck"
+          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "$env:RUNNER_TEMP\precheck"
           dotnet "$env:RUNNER_TEMP\precheck\DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll" --test-config
 
   # ---------- Job 2：发版（依赖 Job 1 通过；仅 tag 触发时执行） ----------
@@ -48,12 +49,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup .NET 6 & 8
+      - name: Setup .NET 6, 8 & 10
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
             6.0.x
             8.0.x
+            10.0.x
 
       - name: Compute version from tag
         id: version
@@ -62,6 +64,13 @@ jobs:
           $ver = "${{ github.ref_name }}" -replace '^v', ''
           "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Release version: $ver"
+
+      - name: Publish net10.0 (framework-dependent)
+        run: >
+          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
+          -c Release -f net10.0 -p:Version=${{ steps.version.outputs.version }}
+          -p:DebugType=none -p:DebugSymbols=false
+          -o artifacts/net10.0
 
       - name: Publish net8.0 (framework-dependent)
         run: >
@@ -81,6 +90,7 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.version.outputs.version }}"
+          Compress-Archive -Path "artifacts/net10.0/*" -DestinationPath "gateway-net10.0-v$ver.zip"
           Compress-Archive -Path "artifacts/net8.0/*" -DestinationPath "gateway-net8.0-v$ver.zip"
           Compress-Archive -Path "artifacts/net6.0/*" -DestinationPath "gateway-net6.0-v$ver.zip"
           Get-ChildItem -Path *.zip | Select-Object Name, Length
@@ -92,5 +102,6 @@ jobs:
           tag_name: ${{ github.ref }}
           generate_release_notes: true
           files: |
+            gateway-net10.0-v${{ steps.version.outputs.version }}.zip
             gateway-net8.0-v${{ steps.version.outputs.version }}.zip
             gateway-net6.0-v${{ steps.version.outputs.version }}.zip

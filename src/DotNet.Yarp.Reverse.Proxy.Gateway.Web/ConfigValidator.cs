@@ -13,7 +13,7 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Web;
 /// </summary>
 public static class ConfigValidator
 {
-    public static bool Validate(string configPath, out string error)
+    public static bool Validate(string configPath, out string? error)
     {
         try
         {

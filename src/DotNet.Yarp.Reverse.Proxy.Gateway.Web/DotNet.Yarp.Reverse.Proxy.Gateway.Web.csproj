@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <!-- 同时支持 .NET 6 与 .NET 8（双目标框架） -->
-    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
+    <!-- 同时支持 .NET 6 / 8 / 10（三目标框架） -->
+    <TargetFrameworks>net6.0;net8.0;net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>

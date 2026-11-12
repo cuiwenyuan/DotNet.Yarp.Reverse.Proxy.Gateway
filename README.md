@@ -1,6 +1,6 @@
 # DotNet.Yarp.Reverse.Proxy.Gateway
 
-基于 .NET 6 / .NET 8 的轻量级反向代理网关，用于在 Windows Server 上替代 nginx 的核心转发能力
+基于 .NET 6 / 8 / 10 的轻量级反向代理网关，用于在 Windows Server 上替代 nginx 的核心转发能力
 （反向代理、负载均衡、健康检查、限流、跨域、入口安全、Location 改写、请求/响应日志）。
 
 > 项目工作目录名为 `DotNet.Nginx`，仓库 / 解决方案名称为 `DotNet.Yarp.Reverse.Proxy.Gateway`。
@@ -112,20 +112,23 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 
 > 说明：`Microsoft.AspNetCore.App` 是编写 ASP.NET Core 应用/中间件的**标准框架引用**，不属于第三方包，
 > 不会违反"只引两个 NuGet"的约束。限流特意**没有**使用 `System.Threading.RateLimiting`
-> （.NET 7+ 专属），而是自研 `SimpleRateLimiter` 令牌桶以兼容 .NET 6 / 8 双目标框架。
+> （.NET 7+ 专属），而是自研 `SimpleRateLimiter` 令牌桶以兼容 .NET 6 / 8 / 10 三目标框架。
 
 ## 4. 环境要求
 
-- **构建端**：安装 .NET 6 SDK 或 .NET 8 SDK（任一即可；双目标框架会同时产出 `net6.0` 与 `net8.0` 两个产物）。
-- **运行端**：部署机安装对应的 **ASP.NET Core Runtime 6 / 8**（或 IIS 用的 **.NET Core Hosting Bundle**）。
+- **构建端**：安装 .NET 10 SDK（推荐，能同时编译三个 TFM）；若只需 net6.0 / net8.0 产物，
+  装 .NET 6 或 .NET 8 SDK 亦可。
+- **运行端**：部署机安装对应的 **ASP.NET Core Runtime 6 / 8 / 10**（或 IIS 用的 **.NET Core Hosting Bundle**）。
 - **操作系统**（依据 .NET 官方支持矩阵）：**Windows Server 2012 / 2012 R2 及以上**（IIS 8.0 / 8.5 / 10，
-  `net6.0` 与 `net8.0` 发布包均支持）；也可在 Windows 10 / 11 或 Linux / macOS 以 Kestrel 自托管。
+  `net6.0` / `net8.0` / `net10.0` 发布包均支持）；也可在 Windows 10 / 11 或 Linux / macOS 以 Kestrel 自托管。
+  - 注意：**net10.0 包**需 Windows Server 2012 及以上且装有 .NET 10 运行时；.NET 10 为 LTS（支持至 2028-11），
+    新项目建议优先选它。
   - 最低版本 **Windows Server 2012 / 2012 R2** 需额外安装
     **Microsoft Visual C++ 2015-2019 Redistributable**，否则可能报
     `api-ms-win-crt-runtime-l1-1-0.dll` 缺失。
   - 提醒：Windows Server 2012 / 2012 R2 官方支持已结束（2023-10，可用 ESU 续期），
     有安全补丁诉求的生产环境建议 **2016+**。
-- **开发本机测试（Windows 10 / 11）**：.NET 6 / 8 均支持，三种跑法——
+- **开发本机测试（Windows 10 / 11）**：.NET 6 / 8 / 10 均支持，三种跑法——
   1. **Kestrel 直跑（推荐）**：`dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web`
      （或解压 Release 包后 `dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll`），SDK 自带 runtime，
      Win10/11 全版本可用，默认 `http://localhost:5000`；日常开发/快速验证用这个即可。
@@ -143,8 +146,8 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 无需源码与编译，直接从 GitHub Releases 下载即用：
 
 1. 打开 Releases 页：<https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway/releases>
-2. 下载最新版 `gateway-net8.0-vX.Y.Z.zip`（部署机为 Windows Server 2019+ 且已装 .NET 8 运行时；
-   若目标机只有 .NET 6，选 `gateway-net6.0-vX.Y.Z.zip`）。
+2. 下载最新版 `gateway-net10.0-vX.Y.Z.zip`（部署机已装 .NET 10 运行时，推荐 LTS 长期支持）；
+   若目标机是 .NET 8 环境选 `gateway-net8.0-vX.Y.Z.zip`，仅有 .NET 6 则选 `gateway-net6.0-vX.Y.Z.zip`。
 3. 解压到任意目录（如 `C:\gateway`）——包内为完整发布目录（dll / appsettings.json / web.config / wwwroot）。
 4. （可选）配置预检，等价 `nginx -t`：
 
@@ -171,11 +174,11 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 # 1) 克隆 / 进入仓库根目录（目录名 = 仓库名，含 DotNet.Yarp.Reverse.Proxy.Gateway.slnx）
 cd DotNet.Yarp.Reverse.Proxy.Gateway
 
-# 2) 还原并构建（双目标框架，Release）
+# 2) 还原并构建（三目标框架，Release）
 dotnet build -c Release
 
 # 2.1) 配置预检（可选，等价 nginx -t）：校验路由/集群唯一性与后端地址合法性
-dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o publish
+dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o publish
 dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK
 
 # 3) 启动网关（Kestrel 默认监听 http://localhost:5000）
@@ -408,8 +411,8 @@ nginx 迁移对照见 **[nginx → 网关迁移对照（中文）](docs/Nginx-to
 简要步骤：
 
 ```bash
-# 发布（以 net8.0 为例；也可选 net6.0）
-dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o "C:\inetpub\wwwroot\gateway"
+# 发布（以 net10.0 为例；也可选 net8.0 / net6.0）
+dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "C:\inetpub\wwwroot\gateway"
 ```
 
 之后在 IIS 中创建站点指向该目录，应用池设为"**无托管代码**"（集成管道），
@@ -417,8 +420,8 @@ dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o
 
 ## 10. 构建产物说明
 
-- 双目标框架：`net6.0` 与 `net8.0`，`dotnet build` 会分别产出两个 TFM 的程序集。
-- 若仅需其中一个运行时，发布时指定 `-f` 即可（如 `-f net8.0`）。
+- 三目标框架：`net6.0`、`net8.0` 与 `net10.0`，`dotnet build` 会分别产出三个 TFM 的程序集。
+- 若仅需其中一个运行时，发布时指定 `-f` 即可（如 `-f net10.0`）。
 - 日志目录：运行时在 `publish/Log`（或 `bin/Release/<tfm>/Log`）下生成 XTrace 日志。
 
 ## 11. 版本与自动发版
@@ -443,11 +446,11 @@ git push origin v1.0.0
 
 推送 `v*` tag 后，[`release.yml`](.github/workflows/release.yml) 自动执行：
 
-1. **构建门禁**：net6.0 + net8.0 双框架 `dotnet build -c Release`，0 错误；
-2. **配置预检门禁**：`--test-config`（等价 `nginx -t`），失败即中止；
-3. **发布打包**：publish net6.0 / net8.0（框架依赖）→
-   `gateway-net8.0-v1.0.0.zip`、`gateway-net6.0-v1.0.0.zip`；
-4. **创建 Release**：上传两个 zip + 自动生成 release notes（tag 间 commits）。
+1. **构建门禁**：net6.0 + net8.0 + net10.0 三框架 `dotnet build -c Release`，0 错误；
+2. **配置预检门禁**：`--test-config`（等价 `nginx -t`，以 net10.0 产物执行），失败即中止；
+3. **发布打包**：publish net10.0 / net8.0 / net6.0（框架依赖）→
+   `gateway-net10.0-v1.0.0.zip`、`gateway-net8.0-v1.0.0.zip`、`gateway-net6.0-v1.0.0.zip`；
+4. **创建 Release**：上传三个 zip + 自动生成 release notes（tag 间 commits）。
 
 ### 部署产物
 

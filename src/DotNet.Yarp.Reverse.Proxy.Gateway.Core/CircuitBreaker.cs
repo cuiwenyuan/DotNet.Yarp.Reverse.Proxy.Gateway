@@ -12,7 +12,7 @@ public enum CircuitBreakerState
 /// 纯 C# 熔断器状态机（对应 Ocelot QoS、Kong 熔断插件）。
 /// Closed：连续失败达阈值后转 Open；Open：在 OpenSeconds 内快速失败（不再放行请求）；
 /// 到期后转 HalfOpen：放行少量探测请求，成功即恢复 Closed，失败则重新 Open。
-/// 线程安全（lock 保护），无定时器，按需惰性判断。兼容 .NET 6 / 8 双目标框架。
+/// 线程安全（lock 保护），无定时器，按需惰性判断。兼容 .NET 6 / 8 / 10 三目标框架。
 /// </summary>
 public sealed class CircuitBreaker
 {

@@ -7,15 +7,16 @@ Server, using the **ASP.NET Core Module (ANCM)** in **inprocess** mode.
 > [nginx → Gateway Migration Guide](Nginx-to-Gateway-Migration.en.md) ·
 > **中文版： [IIS 安装部署指南](IIS-Deployment.zh-CN.md)**
 
-> Both .NET 6 and .NET 8 dual targets are supported. The steps below use `net8.0`; for `net6.0`,
-> replace `-f net8.0` with `-f net6.0` and install the ASP.NET Core Runtime 6 instead.
+> .NET 6 / 8 / 10 multi-targeting is supported. The steps below use `net10.0` (LTS, recommended);
+> for `net8.0` / `net6.0`, replace `-f net10.0` with that TFM and install the matching ASP.NET Core
+> Runtime.
 
 ---
 
 ## 1. Prerequisites
 
 > **Supported range** (per the official .NET support matrix): **Windows Server 2012 / 2012 R2 and
-> later** — IIS 8.0 / 8.5 / 10; both the `net6.0` and `net8.0` packages are supported.
+> later** — IIS 8.0 / 8.5 / 10; the `net6.0`, `net8.0` and `net10.0` packages are all supported.
 > - Windows Server 2012 / 2012 R2 reached end of official support (Oct 2023; ESU can extend it).
 >   Prefer **2016+** for production; if you must deploy on 2012 / 2012 R2, also install the
 >   **Microsoft Visual C++ 2015-2019 Redistributable** (otherwise you may hit a missing
@@ -43,9 +44,10 @@ Enable-WindowsOptionalFeature -Online -FeatureName IIS-ManagementConsole
 The target machine **must** have the **ASP.NET Core Runtime** (or the Hosting Bundle, which also
 includes ANCM v2) matching the publish target. Download and install from Microsoft:
 
-- .NET 8: <https://dotnet.microsoft.com/download/dotnet/8.0> → "ASP.NET Core Runtime 8.x" or
-  ".NET Core Hosting Bundle"
-- .NET 6: <https://dot.net/download/dotnet/6.0> → same (6.x)
+- .NET 10: <https://dotnet.microsoft.com/download/dotnet/10.0> → "ASP.NET Core Runtime 10.x" or
+  ".NET Core Hosting Bundle" (LTS, supported until Nov 2028 — recommended)
+- .NET 8: <https://dotnet.microsoft.com/download/dotnet/8.0> → same (8.x)
+- .NET 6: <https://dot.net/download/dotnet/6.0> → same (6.x, EOL)
 
 After installation, **reboot the server once** so the ANCM module is registered with IIS.
 
@@ -64,8 +66,8 @@ dotnet --list-runtimes
 On the **build machine** (with .NET SDK), publish the output to a folder:
 
 ```bash
-# net8.0 example
-dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o "C:\inetpub\wwwroot\gateway"
+# net10.0 example
+dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "C:\inetpub\wwwroot\gateway"
 ```
 
 After publishing, `C:\inetpub\wwwroot\gateway` should contain:
@@ -361,7 +363,7 @@ site address first).
 
 ## 9. Upgrade & rollback
 
-- **Upgrade**: re-run `dotnet publish -c Release -f net8.0 -o <same folder>`; recycle the app pool
+- **Upgrade**: re-run `dotnet publish -c Release -f net10.0 -o <same folder>`; recycle the app pool
   after overwriting. It's safer to stop the site (`Stop-WebSite`) first to avoid file locks.
 - **Rollback**: keep a snapshot of the previous publish folder (or a Git tag), overwrite with the old
   files, and recycle the app pool.

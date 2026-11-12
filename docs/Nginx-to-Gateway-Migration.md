@@ -148,7 +148,7 @@
 
 ## 5. IIS 部署对应
 
-1. `dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o "C:\inetpub\wwwroot\gateway"`
+1. `dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "C:\inetpub\wwwroot\gateway"`
 2. 应用池：`No Managed Code` + 集成管道（`DotNetGatewayAppPool`）。
 3. 站点绑定：`http :8080` 与 `https :443`（主机头 `gw.example.com`，443 选择证书）。
 4. 静态首页放入 `wwwroot/index.html`（对应 nginx `root html`）。

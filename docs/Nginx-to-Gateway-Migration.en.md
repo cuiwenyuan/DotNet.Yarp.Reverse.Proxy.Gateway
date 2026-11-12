@@ -155,7 +155,7 @@ Key facts of the source nginx site (sanitized):
 
 ## 5. IIS deployment mapping
 
-1. `dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o "C:\inetpub\wwwroot\gateway"`
+1. `dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "C:\inetpub\wwwroot\gateway"`
 2. App pool: `No Managed Code` + Integrated pipeline (`DotNetGatewayAppPool`).
 3. Site bindings: `http :8080` and `https :443` (host header `gw.example.com`, pick the cert on 443).
 4. Put the static home page in `wwwroot/index.html` (nginx `root html` equivalent).

@@ -1,6 +1,6 @@
 # DotNet.Yarp.Reverse.Proxy.Gateway
 
-A lightweight reverse-proxy gateway built on .NET 6 / .NET 8, designed to replace nginx's core
+A lightweight reverse-proxy gateway built on .NET 6 / 8 / 10, designed to replace nginx's core
 forwarding capabilities on Windows Server (reverse proxy, load balancing, health checks, rate
 limiting, CORS, edge security, Location rewriting, and request/response logging).
 
@@ -120,23 +120,26 @@ implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in fr
 > Note: `Microsoft.AspNetCore.App` is the **standard framework reference** for writing ASP.NET Core
 > apps/middleware — not a third-party package, so it does not violate the "two NuGet only" rule.
 > Rate limiting deliberately does **not** use `System.Threading.RateLimiting` (.NET 7+ only); instead
-> a self-built `SimpleRateLimiter` token bucket keeps .NET 6 / 8 dual-targeting compatible.
+> a self-built `SimpleRateLimiter` token bucket keeps .NET 6 / 8 / 10 multi-targeting compatible.
 
 ## 4. Requirements
 
-- **Build machine**: .NET 6 SDK or .NET 8 SDK (either is enough; dual-targeting produces both
-  `net6.0` and `net8.0` artifacts).
-- **Runtime**: the target machine needs the corresponding **ASP.NET Core Runtime 6 / 8** (or the
+- **Build machine**: .NET 10 SDK (recommended — it can compile all three TFMs); if you only need the
+  `net6.0` / `net8.0` artifacts, the .NET 6 or .NET 8 SDK is enough as well.
+- **Runtime**: the target machine needs the corresponding **ASP.NET Core Runtime 6 / 8 / 10** (or the
   **.NET Core Hosting Bundle** for IIS).
 - **OS** (per the official .NET support matrix): **Windows Server 2012 / 2012 R2 and later**
-  (IIS 8.0 / 8.5 / 10 — both the `net6.0` and `net8.0` packages are supported); Kestrel
+  (IIS 8.0 / 8.5 / 10 — the `net6.0`, `net8.0` and `net10.0` packages are all supported); Kestrel
   self-hosting also works on Windows 10 / 11 and Linux / macOS.
+  - Note: the **net10.0** package needs Windows Server 2012 or later with the .NET 10 runtime
+    installed. .NET 10 is an LTS release (supported until Nov 2028), so it is the recommended choice
+    for new deployments.
   - On the minimum **Windows Server 2012 / 2012 R2**, install the
     **Microsoft Visual C++ 2015-2019 Redistributable** as well, or you may hit a missing
     `api-ms-win-crt-runtime-l1-1-0.dll`.
   - Note: Windows Server 2012 / 2012 R2 reached end of official support (Oct 2023; ESU can
     extend it). For production environments that need security patches, prefer **2016+**.
-- **Local dev & testing on Windows 10 / 11**: both .NET 6 and .NET 8 are supported; three ways to
+- **Local dev & testing on Windows 10 / 11**: .NET 6, 8 and 10 are all supported; three ways to
   run —
   1. **Kestrel direct (recommended)**: `dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web`
      (or extract a Release package and run `dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll`).
@@ -158,8 +161,9 @@ implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in fr
 No source code or compilation required — download and run:
 
 1. Open the Releases page: <https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway/releases>
-2. Download the latest `gateway-net8.0-vX.Y.Z.zip` (for Windows Server 2019+ with the .NET 8
-   runtime installed; pick `gateway-net6.0-vX.Y.Z.zip` if the target machine only has .NET 6).
+2. Download the latest `gateway-net10.0-vX.Y.Z.zip` (.NET 10 runtime installed on the target machine —
+   the recommended LTS choice); use `gateway-net8.0-vX.Y.Z.zip` for a .NET 8 environment, or
+   `gateway-net6.0-vX.Y.Z.zip` if the machine only has .NET 6.
 3. Extract it anywhere (e.g. `C:\gateway`) — the zip is a complete publish folder (dll /
    appsettings.json / web.config / wwwroot).
 4. (Optional) Config precheck, equivalent to `nginx -t`:
@@ -189,11 +193,11 @@ No source code or compilation required — download and run:
 # 1) Enter the repo root (folder name = repo name, contains DotNet.Yarp.Reverse.Proxy.Gateway.slnx)
 cd DotNet.Yarp.Reverse.Proxy.Gateway
 
-# 2) Restore and build (dual-targeting, Release)
+# 2) Restore and build (multi-targeting, Release)
 dotnet build -c Release
 
 # 2.1) Config precheck (optional, like `nginx -t`): validates route/cluster uniqueness and backend addresses
-dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o publish
+dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o publish
 dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK
 
 # 3) Run the gateway (Kestrel listens on http://localhost:5000 by default)
@@ -429,8 +433,8 @@ See **[System Architecture (English)](docs/Architecture.en.md)** /
 Quick steps:
 
 ```bash
-# Publish (net8.0 shown; net6.0 also supported)
-dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o "C:\inetpub\wwwroot\gateway"
+# Publish (net10.0 shown; net8.0 / net6.0 also supported)
+dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "C:\inetpub\wwwroot\gateway"
 ```
 
 Then create an IIS site pointing to that folder, set the app pool to **No Managed Code** (Integrated
@@ -438,8 +442,8 @@ pipeline). `web.config` is copied on publish and configured for the inprocess ho
 
 ## 10. Build artifacts
 
-- Dual-targeting: `net6.0` and `net8.0`; `dotnet build` emits both TFM assemblies.
-- To target a single runtime, specify `-f` on publish (e.g. `-f net8.0`).
+- Multi-targeting: `net6.0`, `net8.0` and `net10.0`; `dotnet build` emits all three TFM assemblies.
+- To target a single runtime, specify `-f` on publish (e.g. `-f net10.0`).
 - Log directory: XTrace logs are written under `publish/Log` (or `bin/Release/<tfm>/Log`).
 
 ## 11. Versioning & automated releases
@@ -465,11 +469,12 @@ git push origin v1.0.0
 
 Pushing a `v*` tag triggers [`release.yml`](.github/workflows/release.yml) automatically:
 
-1. **Build gate**: dual-TFM `dotnet build -c Release` (net6.0 + net8.0), zero errors;
-2. **Config precheck gate**: `--test-config` (equivalent to `nginx -t`), abort on failure;
-3. **Publish & package**: publish net6.0 / net8.0 (framework-dependent) →
-   `gateway-net8.0-v1.0.0.zip`, `gateway-net6.0-v1.0.0.zip`;
-4. **Create Release**: upload both zips + auto-generated release notes (commits since last tag).
+1. **Build gate**: multi-TFM `dotnet build -c Release` (net6.0 + net8.0 + net10.0), zero errors;
+2. **Config precheck gate**: `--test-config` (equivalent to `nginx -t`, run against the net10.0
+   artifacts), abort on failure;
+3. **Publish & package**: publish net10.0 / net8.0 / net6.0 (framework-dependent) →
+   `gateway-net10.0-v1.0.0.zip`, `gateway-net8.0-v1.0.0.zip`, `gateway-net6.0-v1.0.0.zip`;
+4. **Create Release**: upload all three zips + auto-generated release notes (commits since last tag).
 
 ### Deployment artifact
 

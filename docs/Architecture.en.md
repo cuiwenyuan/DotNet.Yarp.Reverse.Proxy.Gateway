@@ -73,7 +73,7 @@ A **single-process, single-config-file** reverse-proxy gateway that replaces ngi
 `Yarp.ReverseProxy` (Web layer) and `NewLife.Core` (Core layer). `Microsoft.AspNetCore.App` is a
 framework reference (not NuGet) providing `HttpContext` / `RequestDelegate` and other middleware
 infrastructure. All governance logic is implemented in pure C# / BCL, which keeps the audit surface
-small, avoids supply-chain risk, and keeps dual-target compilation (net6.0/net8.0) working.
+small, avoids supply-chain risk, and keeps multi-target compilation (net6.0/net8.0/net10.0) working.
 
 **Layering rule**: Core never references YARP types (e.g. `ILoadBalancingPolicy`, `ClusterState`).
 Anything that depends on YARP types (the weighted load-balancing policy) lives in the Web host layer,

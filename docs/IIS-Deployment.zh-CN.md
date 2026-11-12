@@ -7,15 +7,16 @@
 > [nginx → 网关迁移对照](Nginx-to-Gateway-Migration.md) ·
 > **English: [IIS Deployment Guide](IIS-Deployment.en.md)**
 
-> 适用版本：.NET 6 / .NET 8 双目标框架均支持。下文以 `net8.0` 为例；如需 `net6.0`，把命令中的
-> `-f net8.0` 换成 `-f net6.0`、运行库换成 ASP.NET Core Runtime 6 即可。
+> 适用版本：.NET 6 / 8 / 10 三目标框架均支持。下文以 `net10.0` 为例（LTS，推荐）；
+> 如需 `net8.0` / `net6.0`，把命令中的 `-f net10.0` 换成对应 TFM、运行库换成对应版本的
+> ASP.NET Core Runtime 即可。
 
 ---
 
 ## 1. 前置条件
 
 > **支持范围**（依据 .NET 官方支持矩阵）：**Windows Server 2012 / 2012 R2 及以上**——
-> 对应 IIS 8.0 / 8.5 / 10，`net6.0` 与 `net8.0` 发布包均支持。
+> 对应 IIS 8.0 / 8.5 / 10，`net6.0` / `net8.0` / `net10.0` 发布包均支持。
 > - Windows Server 2012 / 2012 R2 已结束官方支持（2023-10，可用 ESU 续期），
 >   生产环境建议 **2016+**；如确需部署在 2012 / 2012 R2，请额外安装
 >   **Microsoft Visual C++ 2015-2019 Redistributable**（否则可能报
@@ -42,9 +43,10 @@ Enable-WindowsOptionalFeature -Online -FeatureName IIS-ManagementConsole
 部署机**必须**安装与发布目标匹配的 **ASP.NET Core Runtime**（或 Hosting Bundle，它同时含 ANCM v2）。
 到微软官方下载并安装：
 
-- .NET 8：<https://dotnet.microsoft.com/download/dotnet/8.0> → "ASP.NET Core Runtime 8.x" 或
-  ".NET Core Hosting Bundle"
-- .NET 6：<https://dot.net/download/dotnet/6.0> → 同上（6.x）
+- .NET 10：<https://dotnet.microsoft.com/download/dotnet/10.0> → "ASP.NET Core Runtime 10.x" 或
+  ".NET Core Hosting Bundle"（LTS，支持至 2028-11，推荐）
+- .NET 8：<https://dotnet.microsoft.com/download/dotnet/8.0> → 同上（8.x）
+- .NET 6：<https://dot.net/download/dotnet/6.0> → 同上（6.x，已 EOL）
 
 安装完成后，**建议重启一次服务器**，确保 ANCM 模块被正确注册到 IIS。
 
@@ -63,8 +65,8 @@ dotnet --list-runtimes
 在**构建机**（已装 .NET SDK）上执行发布，把产物输出到一个目录：
 
 ```bash
-# 以 net8.0 为例
-dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net8.0 -o "C:\inetpub\wwwroot\gateway"
+# 以 net10.0 为例
+dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "C:\inetpub\wwwroot\gateway"
 ```
 
 发布完成后，`C:\inetpub\wwwroot\gateway` 目录应包含：
@@ -338,7 +340,7 @@ Invoke-WebRequest -Uri "http://localhost/admin/status" -Method GET -SkipHttpErro
 
 ## 9. 升级与回滚
 
-- **升级**：重新 `dotnet publish -c Release -f net8.0 -o <同目录>`，覆盖文件后回收应用池即可。
+- **升级**：重新 `dotnet publish -c Release -f net10.0 -o <同目录>`，覆盖文件后回收应用池即可。
   建议先停站点（`Stop-WebSite`）再覆盖，避免文件占用。
 - **回滚**：保留上一版发布目录快照（或 Git 标签），覆盖回旧文件并回收应用池。
 

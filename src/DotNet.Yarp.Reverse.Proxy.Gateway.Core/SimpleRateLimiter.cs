@@ -3,7 +3,7 @@ using System;
 namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 
 /// <summary>
-/// 纯 C# 令牌桶限流器，兼容 .NET 6 / .NET 8 双目标框架。
+/// 纯 C# 令牌桶限流器，兼容 .NET 6 / 8 / 10 三目标框架。
 /// 等价于 nginx 的 limit_req（rate=补充速率 / burst=桶容量 / delay=平滑模式）：
 ///   - 补充速率（refill）：窗口内允许的请求数按时间均匀补充；
 ///   - 桶容量（burst）：允许瞬时突发（capacity ≥ rate 时，突发量 = capacity - rate）；

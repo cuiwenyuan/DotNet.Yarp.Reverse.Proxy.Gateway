@@ -68,7 +68,7 @@
 **依赖边界铁律**：整个解决方案只允许两个 NuGet 包——`Yarp.ReverseProxy`（Web 层）与
 `NewLife.Core`（Core 层）。`Microsoft.AspNetCore.App` 是框架引用（非 NuGet），提供
 `HttpContext` / `RequestDelegate` 等中间件基础设施。所有治理逻辑用纯 C# / BCL 实现，
-这保证：审计面小、无供应链风险、双框架（net6.0/net8.0）可编译。
+这保证：审计面小、无供应链风险、三框架（net6.0/net8.0/net10.0）可编译。
 
 **分层原则**：Core 不引用 YARP 类型（如 `ILoadBalancingPolicy`、`ClusterState`），凡依赖 YARP
 类型的能力（加权负载策略）放在 Web 宿主层，保持 Core 可独立测试与复用。

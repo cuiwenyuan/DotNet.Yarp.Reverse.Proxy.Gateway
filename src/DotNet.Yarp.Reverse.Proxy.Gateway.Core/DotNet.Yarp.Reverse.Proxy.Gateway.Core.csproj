@@ -1,11 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- 同时支持 .NET 6 与 .NET 8（双目标框架） -->
-    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
+    <!-- 同时支持 .NET 6 / 8 / 10（三目标框架） -->
+    <TargetFrameworks>net6.0;net8.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- 允许使用 C# 12 语法（struct 主构造函数等）在双目标下编译 -->
+    <!-- 允许使用最新 C# 语法（struct 主构造函数等）在多目标下编译 -->
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
