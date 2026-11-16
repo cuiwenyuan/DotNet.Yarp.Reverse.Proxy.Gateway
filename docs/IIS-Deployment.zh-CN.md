@@ -45,7 +45,7 @@ Enable-WindowsOptionalFeature -Online -FeatureName IIS-ManagementConsole
 
 - .NET 10：<https://dotnet.microsoft.com/download/dotnet/10.0> → "ASP.NET Core Runtime 10.x" 或
   ".NET Core Hosting Bundle"（LTS，支持至 2028-11，推荐）
-- .NET 8：<https://dotnet.microsoft.com/download/dotnet/8.0> → 同上（8.x）
+- .NET 8：<https://dotnet.microsoft.com/download/dotnet/8.0> → 同上（8.x，官方支持已于 2026-11 结束，仅供存量环境）
 - .NET 6：<https://dot.net/download/dotnet/6.0> → 同上（6.x，已 EOL）
 
 安装完成后，**建议重启一次服务器**，确保 ANCM 模块被正确注册到 IIS。

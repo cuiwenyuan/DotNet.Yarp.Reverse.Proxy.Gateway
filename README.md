@@ -119,16 +119,27 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 - **构建端**：安装 .NET 10 SDK（推荐，能同时编译三个 TFM）；若只需 net6.0 / net8.0 产物，
   装 .NET 6 或 .NET 8 SDK 亦可。
 - **运行端**：部署机安装对应的 **ASP.NET Core Runtime 6 / 8 / 10**（或 IIS 用的 **.NET Core Hosting Bundle**）。
-- **操作系统**（依据 .NET 官方支持矩阵）：**Windows Server 2012 / 2012 R2 及以上**（IIS 8.0 / 8.5 / 10，
-  `net6.0` / `net8.0` / `net10.0` 发布包均支持）；也可在 Windows 10 / 11 或 Linux / macOS 以 Kestrel 自托管。
-  - 注意：**net10.0 包**需 Windows Server 2012 及以上且装有 .NET 10 运行时；.NET 10 为 LTS（支持至 2028-11），
-    新项目建议优先选它。
-  - 最低版本 **Windows Server 2012 / 2012 R2** 需额外安装
+- **操作系统与 IIS**（依据 [.NET 官方支持矩阵](https://learn.microsoft.com/dotnet/core/install/windows)）：
+  **Windows Server 2012 / 2012 R2 及以上**，也可在 Windows 10 / 11 或 Linux / macOS 以 Kestrel 自托管。
+  三个 TFM 的 Windows Server / IIS 兼容范围一致，差别只在 .NET 运行时自身的官方支持期：
+
+  | 目标框架 | 支持的 Windows Server 版本 | 对应 IIS 版本 | .NET 官方支持状态 |
+  | --- | --- | --- | --- |
+  | `net10.0` | 2012 / 2012 R2 / 2016 / 2019 / 2022 / 23H2 / 2025（含 Server Core；Nano Server 2019 / 2022 / 2025） | IIS 8.0 / 8.5 / 10.0 | ✅ LTS，支持至 **2028-11**，**推荐** |
+  | `net8.0` | 2012 / 2012 R2 / 2016 / 2019 / 2022 / 23H2 / 2025（含 Server Core） | IIS 8.0 / 8.5 / 10.0 | ⚠️ 支持已于 **2026-11-10** 结束，仅供存量环境 |
+  | `net6.0` | 2012 / 2012 R2 / 2016 / 2019 / 2022（含 Server Core） | IIS 8.0 / 8.5 / 10.0 | ❌ 支持已于 **2024-11-12** 结束，仅供存量环境 |
+
+  - 三个 TFM 最低都是 **Windows Server 2012（IIS 8.0）**；生产环境请优先选
+    `gateway-net10.0-*.zip` + **ASP.NET Core Runtime 10 / .NET Hosting Bundle 10**。
+  - 最低版本 **Windows Server 2012 / 2012 R2**（IIS 8.0 / 8.5）需额外安装
     **Microsoft Visual C++ 2015-2019 Redistributable**，否则可能报
     `api-ms-win-crt-runtime-l1-1-0.dll` 缺失。
   - 提醒：Windows Server 2012 / 2012 R2 官方支持已结束（2023-10，可用 ESU 续期），
-    有安全补丁诉求的生产环境建议 **2016+**。
-- **开发本机测试（Windows 10 / 11）**：.NET 6 / 8 / 10 均支持，三种跑法——
+    有安全补丁诉求的生产环境建议 **2016+（IIS 10.0）**。
+  - 客户端 Windows：.NET 10 官方支持 **Windows 11** 各现行版本，以及 **Windows 10 的
+    LTSC（1607 / 1809 / 21H2）与 Enterprise 版**；Win10 消费版（Home / Pro 22H2）已过支持期，
+    开发测试建议 Windows 11 或 Win10 LTSC / Enterprise。
+- **开发本机测试（Windows 10 / 11）**：.NET 6 / 8 / 10 均可运行，三种跑法——
   1. **Kestrel 直跑（推荐）**：`dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web`
      （或解压 Release 包后 `dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll`），SDK 自带 runtime，
      Win10/11 全版本可用，默认 `http://localhost:5000`；日常开发/快速验证用这个即可。

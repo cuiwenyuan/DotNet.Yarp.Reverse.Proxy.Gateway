@@ -128,18 +128,29 @@ implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in fr
   `net6.0` / `net8.0` artifacts, the .NET 6 or .NET 8 SDK is enough as well.
 - **Runtime**: the target machine needs the corresponding **ASP.NET Core Runtime 6 / 8 / 10** (or the
   **.NET Core Hosting Bundle** for IIS).
-- **OS** (per the official .NET support matrix): **Windows Server 2012 / 2012 R2 and later**
-  (IIS 8.0 / 8.5 / 10 — the `net6.0`, `net8.0` and `net10.0` packages are all supported); Kestrel
-  self-hosting also works on Windows 10 / 11 and Linux / macOS.
-  - Note: the **net10.0** package needs Windows Server 2012 or later with the .NET 10 runtime
-    installed. .NET 10 is an LTS release (supported until Nov 2028), so it is the recommended choice
-    for new deployments.
-  - On the minimum **Windows Server 2012 / 2012 R2**, install the
+- **OS & IIS** (per the [official .NET support matrix](https://learn.microsoft.com/en-us/dotnet/core/install/windows)):
+  **Windows Server 2012 / 2012 R2 and later**; Kestrel self-hosting also works on Windows 10 / 11
+  and Linux / macOS. All three TFMs share the same Windows Server / IIS compatibility range — what
+  differs is the official support window of the .NET runtime itself:
+
+  | Target framework | Supported Windows Server versions | Matching IIS versions | .NET official support |
+  | --- | --- | --- | --- |
+  | `net10.0` | 2012 / 2012 R2 / 2016 / 2019 / 2022 / 23H2 / 2025 (incl. Server Core; Nano Server 2019 / 2022 / 2025) | IIS 8.0 / 8.5 / 10.0 | ✅ LTS, supported until **Nov 2028** — **recommended** |
+  | `net8.0` | 2012 / 2012 R2 / 2016 / 2019 / 2022 / 23H2 / 2025 (incl. Server Core) | IIS 8.0 / 8.5 / 10.0 | ⚠️ support ended **Nov 10, 2026** — existing environments only |
+  | `net6.0` | 2012 / 2012 R2 / 2016 / 2019 / 2022 (incl. Server Core) | IIS 8.0 / 8.5 / 10.0 | ❌ support ended **Nov 12, 2024** — existing environments only |
+
+  - The minimum for all three TFMs is **Windows Server 2012 (IIS 8.0)**. For production, prefer the
+    `gateway-net10.0-*.zip` package with **ASP.NET Core Runtime 10 / .NET Hosting Bundle 10**.
+  - On the minimum **Windows Server 2012 / 2012 R2** (IIS 8.0 / 8.5), install the
     **Microsoft Visual C++ 2015-2019 Redistributable** as well, or you may hit a missing
     `api-ms-win-crt-runtime-l1-1-0.dll`.
   - Note: Windows Server 2012 / 2012 R2 reached end of official support (Oct 2023; ESU can
-    extend it). For production environments that need security patches, prefer **2016+**.
-- **Local dev & testing on Windows 10 / 11**: .NET 6, 8 and 10 are all supported; three ways to
+    extend it). For production environments that need security patches, prefer **2016+ (IIS 10.0)**.
+  - Client Windows: .NET 10 officially supports current **Windows 11** releases plus
+    **Windows 10 LTSC (1607 / 1809 / 21H2) and Enterprise editions**; consumer Windows 10
+    (Home / Pro 22H2) is past its support window — use Windows 11 or Win10 LTSC / Enterprise
+    for development and testing.
+- **Local dev & testing on Windows 10 / 11**: .NET 6, 8 and 10 can all run; three ways to
   run —
   1. **Kestrel direct (recommended)**: `dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web`
      (or extract a Release package and run `dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll`).

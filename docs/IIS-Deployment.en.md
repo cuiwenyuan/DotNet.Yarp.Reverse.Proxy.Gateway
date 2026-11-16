@@ -46,7 +46,7 @@ includes ANCM v2) matching the publish target. Download and install from Microso
 
 - .NET 10: <https://dotnet.microsoft.com/download/dotnet/10.0> → "ASP.NET Core Runtime 10.x" or
   ".NET Core Hosting Bundle" (LTS, supported until Nov 2028 — recommended)
-- .NET 8: <https://dotnet.microsoft.com/download/dotnet/8.0> → same (8.x)
+- .NET 8: <https://dotnet.microsoft.com/download/dotnet/8.0> → same (8.x, official support ended Nov 2026 — existing environments only)
 - .NET 6: <https://dot.net/download/dotnet/6.0> → same (6.x, EOL)
 
 After installation, **reboot the server once** so the ANCM module is registered with IIS.
