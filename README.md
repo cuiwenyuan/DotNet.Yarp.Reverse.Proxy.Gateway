@@ -262,6 +262,8 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
     ├── Architecture.en.md                # System Architecture (English)
     ├── Nginx-to-Gateway-Migration.md     # nginx → 网关迁移对照（脱敏示例）
     ├── Nginx-to-Gateway-Migration.en.md  # nginx → Gateway Migration Guide (English)
+    ├── Competitive-Analysis.zh-CN.md     # 竞品分析（中文，含 2026 新竞品）
+    ├── Competitive-Analysis.en.md        # Competitive Analysis (English)
     ├── IIS-Deployment.zh-CN.md           # IIS 安装部署指南（中文）
     └── IIS-Deployment.en.md              # IIS Deployment Guide（English）
 ```
@@ -416,6 +418,8 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 **[System Architecture (English)](docs/Architecture.en.md)**；
 nginx 迁移对照见 **[nginx → 网关迁移对照（中文）](docs/Nginx-to-Gateway-Migration.md)** /
 **[nginx → Gateway Migration Guide (English)](docs/Nginx-to-Gateway-Migration.en.md)**；
+竞品分析见 **[竞品分析（中文）](docs/Competitive-Analysis.zh-CN.md)** /
+**[Competitive Analysis (English)](docs/Competitive-Analysis.en.md)**；
 部署步骤详见 **[IIS 安装部署指南（中文）](docs/IIS-Deployment.zh-CN.md)** /
 **[IIS Deployment Guide (English)](docs/IIS-Deployment.en.md)**。
 

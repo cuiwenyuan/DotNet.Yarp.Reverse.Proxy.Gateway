@@ -282,6 +282,8 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # Repo root (local work dir may be named Do
     ├── Architecture.en.md                # System Architecture (English)
     ├── Nginx-to-Gateway-Migration.md     # nginx → gateway migration mapping (sanitized)
     ├── Nginx-to-Gateway-Migration.en.md  # nginx → Gateway Migration Guide (English)
+    ├── Competitive-Analysis.zh-CN.md     # Competitive analysis (Chinese, incl. 2026 newcomers)
+    ├── Competitive-Analysis.en.md        # Competitive Analysis (English)
     ├── IIS-Deployment.zh-CN.md           # IIS deployment guide (Chinese)
     └── IIS-Deployment.en.md              # IIS Deployment Guide (English)
 ```
@@ -437,7 +439,9 @@ Example:
 See **[System Architecture (English)](docs/Architecture.en.md)** /
 **[系统架构（中文）](docs/Architecture.zh-CN.md)** for the design,
 **[nginx → Gateway Migration Guide (English)](docs/Nginx-to-Gateway-Migration.en.md)** /
-**[nginx → 网关迁移对照（中文）](docs/Nginx-to-Gateway-Migration.md)** for migration from nginx, and
+**[nginx → 网关迁移对照（中文）](docs/Nginx-to-Gateway-Migration.md)** for migration from nginx,
+**[Competitive Analysis (English)](docs/Competitive-Analysis.en.md)** /
+**[竞品分析（中文）](docs/Competitive-Analysis.zh-CN.md)** for the competitive landscape, and
 **[IIS Deployment Guide (English)](docs/IIS-Deployment.en.md)** /
 **[IIS 安装部署指南（中文）](docs/IIS-Deployment.zh-CN.md)** for the deployment steps.
 
