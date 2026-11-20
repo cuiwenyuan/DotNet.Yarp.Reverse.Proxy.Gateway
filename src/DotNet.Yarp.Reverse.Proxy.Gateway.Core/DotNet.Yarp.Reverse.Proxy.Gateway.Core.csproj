@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <!-- 唯一允许的第三方 NuGet：NewLife.Core（日志/配置/缓存/序列化基础设施） -->
-    <PackageReference Include="NewLife.Core" Version="11.18.2026.801" />
+    <PackageReference Include="NewLife.Core" Version="12.0.2026.1024" />
   </ItemGroup>
 
   <ItemGroup>
