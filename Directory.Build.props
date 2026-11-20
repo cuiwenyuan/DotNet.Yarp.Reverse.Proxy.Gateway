@@ -1,14 +1,14 @@
 <Project>
 
   <!--
-    版本号单一来源（SemVer）。
-    日常开发：直接改 VersionPrefix（如 1.1.0）；CI 发版时由 GitHub Actions 用
-    -p:Version=<tag版本> 覆盖，本地无需维护，避免两处不同步。
+    版本号基号（NewLife 规则：主.次.年.MDD，与 cuiwenyuan/NewLife.EFBM 一致）。
+    VersionPrefix 只写「主.次」（如 1.1）；发版时由 CI 拼上 .年.MDD（如 1.1.2026.1120
+    = 2026-11-20，月不补零）经 -p:Version 注入，本地无需维护，避免两处不同步。
+    InformationalVersion 不显式设值，交给 SDK 自动追加 Git commit（如 1.1.2026.1120+6a44d70）。
   -->
   <PropertyGroup>
-    <VersionPrefix>1.1.0</VersionPrefix>
+    <VersionPrefix>1.1</VersionPrefix>
     <VersionSuffix></VersionSuffix>
-    <InformationalVersion>$(VersionPrefix)$(VersionSuffix)</InformationalVersion>
   </PropertyGroup>
 
   <!-- 程序集元数据（两项目共享） -->

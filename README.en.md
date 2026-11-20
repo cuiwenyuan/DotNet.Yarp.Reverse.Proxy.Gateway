@@ -172,9 +172,10 @@ implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in fr
 No source code or compilation required — download and run:
 
 1. Open the Releases page: <https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway/releases>
-2. Download the latest `gateway-net10.0-vX.Y.Z.zip` (.NET 10 runtime installed on the target machine —
-   the recommended LTS choice); use `gateway-net8.0-vX.Y.Z.zip` for a .NET 8 environment, or
-   `gateway-net6.0-vX.Y.Z.zip` if the machine only has .NET 6.
+2. Download the latest `gateway-net10.0-v<version>.zip` (version looks like `1.1.2026.1120`;
+   target machine has the .NET 10 runtime installed — the recommended LTS choice); use
+   `gateway-net8.0-v<version>.zip` for a .NET 8 environment, or `gateway-net6.0-v<version>.zip`
+   if the machine only has .NET 6.
 3. Extract it anywhere (e.g. `C:\gateway`) — the zip is a complete publish folder (dll /
    appsettings.json / web.config / wwwroot).
 4. (Optional) Config precheck, equivalent to `nginx -t`:
@@ -479,23 +480,29 @@ pipeline). `web.config` is copied on publish and configured for the inprocess ho
 
 ## 11. Versioning & automated releases
 
-### Version number (SemVer, single source of truth)
+### Version number (NewLife rule: major.minor.year.MDD)
 
-The version is **driven by Git tags**: the development version lives in
-[`Directory.Build.props`](Directory.Build.props) at the repo root under `VersionPrefix`
-(currently `1.0.0`); on release, GitHub Actions overrides it via `-p:Version=<tag version>`, so
-nothing has to be maintained locally and the two can never drift apart.
+To stay consistent with the automated releases of
+[NewLife.EFBM](https://github.com/cuiwenyuan/NewLife.EFBM), this project adopts the
+**NewLife-style four-part version `major.minor.year.MDD`** (month **not** zero-padded). For example,
+`1.1.2026.1120` means base 1.1, released on 2026-11-20.
 
-- Assembly version: `AssemblyVersion / FileVersion` = the version number.
-- Informational version: `InformationalVersion` = version + Git commit (e.g. `1.0.0+6a44d70`),
-  visible in the `version` field of `/admin/status` for production reconciliation.
+- The **base** (major.minor) lives in [`Directory.Build.props`](Directory.Build.props) under
+  `VersionPrefix` (currently `1.1`); only major/minor is maintained by hand.
+- The `.year.MDD` part is generated at release time: taken from the tag (minus the `v`) for tag
+  pushes, or supplied / derived from today's date for manual runs.
+- Validation gate: a version that does not match `major.minor.year.MDD` aborts the release — no
+  package or Release is produced.
+- Assembly version: `AssemblyVersion / FileVersion` = the full four-part version; the informational
+  version gets the Git commit appended by the SDK (e.g. `1.1.2026.1120+6a44d70`), visible in the
+  `version` field of `/admin/status` for production reconciliation.
 
 ### Release flow (automatic via GitHub Actions)
 
 ```bash
-# After committing, create a tag and push (version = tag without the leading "v")
-git tag v1.0.0
-git push origin v1.0.0
+# After committing, create a tag and push (version = tag without "v", must match major.minor.year.MDD)
+git tag v1.1.2026.1120
+git push origin v1.1.2026.1120
 ```
 
 Pushing a `v*` tag triggers [`release.yml`](.github/workflows/release.yml) automatically:
@@ -503,9 +510,12 @@ Pushing a `v*` tag triggers [`release.yml`](.github/workflows/release.yml) autom
 1. **Build gate**: multi-TFM `dotnet build -c Release` (net6.0 + net8.0 + net10.0), zero errors;
 2. **Config precheck gate**: `--test-config` (equivalent to `nginx -t`, run against the net10.0
    artifacts), abort on failure;
-3. **Publish & package**: publish net10.0 / net8.0 / net6.0 (framework-dependent) →
-   `gateway-net10.0-v1.0.0.zip`, `gateway-net8.0-v1.0.0.zip`, `gateway-net6.0-v1.0.0.zip`;
-4. **Create Release**: upload all three zips + auto-generated release notes (commits since last tag).
+3. **Determine version**: extract from the tag and validate against the NewLife rule, abort on failure;
+4. **Publish & package**: publish net10.0 / net8.0 / net6.0 (framework-dependent) →
+   `gateway-net10.0-v1.1.2026.1120.zip`, `gateway-net8.0-v1.1.2026.1120.zip`,
+   `gateway-net6.0-v1.1.2026.1120.zip`;
+5. **Create Release**: titled `Gateway v1.1.2026.1120`, upload all three zips + auto-generated release
+   notes, and mark it as latest.
 
 ### Deployment artifact
 
@@ -513,8 +523,9 @@ Each zip contains the complete publish folder (dll / appsettings.json / web.conf
 **extract it into the IIS site folder to deploy**. The target machine needs the matching ASP.NET
 Core Runtime / Hosting Bundle (framework-dependent).
 
-> Manual trigger (no tag): GitHub Actions → Release workflow → **Run workflow** — runs only the
-> build + precheck gates for everyday validation.
+> Manual release (without a tag): GitHub Actions → Release workflow → **Run workflow**, optionally
+> supply a version (e.g. `1.1.2026.1120`); leave it blank to derive the base + today's date. Manual
+> runs also create a Release and tag, and must pass all the gates above.
 
 ## 12. License & disclaimer
 

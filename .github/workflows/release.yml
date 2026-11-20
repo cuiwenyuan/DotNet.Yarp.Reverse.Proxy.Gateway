@@ -1,11 +1,21 @@
 name: Release
 
-# 发版触发：推送 v* tag（如 v1.0.0）自动发版；workflow_dispatch 手动触发仅做构建+预检门禁。
+# 自动发布规则对齐 NewLife.EFBM：版本号遵循 NewLife 规则「主.次.年.MDD」（月不补零）。
+# 例：1.1.2026.1120 = 1.1 基号 + 2026 年 11 月 20 日。
+# 触发方式：
+#   1. 推送 v* tag（推荐）：git tag v1.1.2026.1120 && git push origin v1.1.2026.1120
+#      —— 版本号从 tag 去掉 v 前缀获得。
+#   2. Actions 页面手动触发（workflow_dispatch）：可填版本号；留空 = 基号 + 当天日期自动生成。
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 1.1.2026.1120；留空 = 用 Directory.Build.props 基号 + 当天 年.MDD 自动生成）'
+        required: false
+        default: ''
 
 env:
   DOTNET_NOLOGO: true
@@ -26,6 +36,7 @@ jobs:
             6.0.x
             8.0.x
             10.0.x
+          dotnet-quality: 'ga'
 
       - name: Restore & build (Release, net6.0 + net8.0 + net10.0)
         run: dotnet build -c Release
@@ -36,16 +47,16 @@ jobs:
           dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "$env:RUNNER_TEMP\precheck"
           dotnet "$env:RUNNER_TEMP\precheck\DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll" --test-config
 
-  # ---------- Job 2：发版（依赖 Job 1 通过；仅 tag 触发时执行） ----------
+  # ---------- Job 2：发版（依赖 Job 1 通过；tag 或手动触发均可） ----------
   release:
     name: Publish & create GitHub Release
     needs: build
     runs-on: windows-latest
+    timeout-minutes: 30
     # 新仓库默认 Actions 的 GITHUB_TOKEN 为只读，必须显式声明 contents: write
-    # 才能创建 GitHub Release 并上传资产（否则 403 Resource not accessible）。
+    # 才能创建 GitHub Release / 自动建 tag（否则 403 Resource not accessible）。
     permissions:
       contents: write
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -56,40 +67,63 @@ jobs:
             6.0.x
             8.0.x
             10.0.x
+          dotnet-quality: 'ga'
 
-      - name: Compute version from tag
-        id: version
+      - name: Determine version (NewLife rule: major.minor.year.MDD)
+        id: ver
         shell: pwsh
         run: |
-          $ver = "${{ github.ref_name }}" -replace '^v', ''
-          "version=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Release version: $ver"
+          $ErrorActionPreference = 'Stop'
+          $evt = '${{ github.event_name }}'
+          $inputVersion = '${{ inputs.version }}'
+          if ($evt -eq 'push') {
+            # 标签触发：v1.1.2026.1120 -> 1.1.2026.1120
+            $VERSION = ('${{ github.ref_name }}' -replace '^v', '')
+          } elseif ($inputVersion -ne '') {
+            # 手动触发且填写了版本号
+            $VERSION = $inputVersion
+          } else {
+            # 手动触发未填：Directory.Build.props 基号 + 当天 年.MDD（月不补零）
+            $props = Get-Content Directory.Build.props -Raw
+            $BASE = [regex]::Match($props, '<VersionPrefix>([^<]+)</VersionPrefix>').Groups[1].Value
+            if (-not $BASE) { throw 'Cannot read VersionPrefix from Directory.Build.props' }
+            $now = Get-Date
+            $MDD = '{0}{1}' -f $now.Month, $now.Day
+            $VERSION = '{0}.{1}.{2}' -f $BASE, $now.Year, $MDD
+          }
+          # 校验闸门：必须符合 NewLife 规则 主.次.年.MDD（含 4 位年份 + .MDD 段）
+          if ($VERSION -notmatch '^\d+\.\d+\.\d{4}\.\d{2,4}$') {
+            Write-Error "版本号 $VERSION 不符合 NewLife 规则（主.次.年.MDD，如 1.1.2026.1120）"
+            exit 1
+          }
+          "version=$VERSION" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "==> Release version: $VERSION"
 
       - name: Publish net10.0 (framework-dependent)
         run: >
           dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
-          -c Release -f net10.0 -p:Version=${{ steps.version.outputs.version }}
+          -c Release -f net10.0 -p:Version=${{ steps.ver.outputs.version }}
           -p:DebugType=none -p:DebugSymbols=false
           -o artifacts/net10.0
 
       - name: Publish net8.0 (framework-dependent)
         run: >
           dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
-          -c Release -f net8.0 -p:Version=${{ steps.version.outputs.version }}
+          -c Release -f net8.0 -p:Version=${{ steps.ver.outputs.version }}
           -p:DebugType=none -p:DebugSymbols=false
           -o artifacts/net8.0
 
       - name: Publish net6.0 (framework-dependent)
         run: >
           dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
-          -c Release -f net6.0 -p:Version=${{ steps.version.outputs.version }}
+          -c Release -f net6.0 -p:Version=${{ steps.ver.outputs.version }}
           -p:DebugType=none -p:DebugSymbols=false
           -o artifacts/net6.0
 
       - name: Package zip
         shell: pwsh
         run: |
-          $ver = "${{ steps.version.outputs.version }}"
+          $ver = '${{ steps.ver.outputs.version }}'
           Compress-Archive -Path "artifacts/net10.0/*" -DestinationPath "gateway-net10.0-v$ver.zip"
           Compress-Archive -Path "artifacts/net8.0/*" -DestinationPath "gateway-net8.0-v$ver.zip"
           Compress-Archive -Path "artifacts/net6.0/*" -DestinationPath "gateway-net6.0-v$ver.zip"
@@ -98,10 +132,12 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: v${{ steps.version.outputs.version }}
-          tag_name: ${{ github.ref }}
+          # 标签触发用已有 tag；手动触发以 v+版本号 自动建 tag（指向默认分支当前提交）
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', steps.ver.outputs.version) }}
+          name: Gateway v${{ steps.ver.outputs.version }}
           generate_release_notes: true
+          make_latest: true
           files: |
-            gateway-net10.0-v${{ steps.version.outputs.version }}.zip
-            gateway-net8.0-v${{ steps.version.outputs.version }}.zip
-            gateway-net6.0-v${{ steps.version.outputs.version }}.zip
+            gateway-net10.0-v${{ steps.ver.outputs.version }}.zip
+            gateway-net8.0-v${{ steps.ver.outputs.version }}.zip
+            gateway-net6.0-v${{ steps.ver.outputs.version }}.zip

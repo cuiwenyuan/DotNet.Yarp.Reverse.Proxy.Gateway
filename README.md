@@ -157,8 +157,9 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 无需源码与编译，直接从 GitHub Releases 下载即用：
 
 1. 打开 Releases 页：<https://github.com/cuiwenyuan/DotNet.Yarp.Reverse.Proxy.Gateway/releases>
-2. 下载最新版 `gateway-net10.0-vX.Y.Z.zip`（部署机已装 .NET 10 运行时，推荐 LTS 长期支持）；
-   若目标机是 .NET 8 环境选 `gateway-net8.0-vX.Y.Z.zip`，仅有 .NET 6 则选 `gateway-net6.0-vX.Y.Z.zip`。
+2. 下载最新版 `gateway-net10.0-v<版本>.zip`（版本号形如 `1.1.2026.1120`，部署机已装 .NET 10
+   运行时，推荐 LTS 长期支持）；若目标机是 .NET 8 环境选 `gateway-net8.0-v<版本>.zip`，
+   仅有 .NET 6 则选 `gateway-net6.0-v<版本>.zip`。
 3. 解压到任意目录（如 `C:\gateway`）——包内为完整发布目录（dll / appsettings.json / web.config / wwwroot）。
 4. （可选）配置预检，等价 `nginx -t`：
 
@@ -457,39 +458,46 @@ dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -
 
 ## 11. 版本与自动发版
 
-### 版本号（SemVer，单一来源）
+### 版本号（NewLife 规则：主.次.年.MDD）
 
-版本号由 **Git tag 驱动**：日常开发版本写在根目录
-[`Directory.Build.props`](Directory.Build.props) 的 `VersionPrefix`（当前 `1.0.0`）；发版时由
-GitHub Actions 用 `-p:Version=<tag 版本>` 注入覆盖，本地无需额外维护，杜绝两处不同步。
+与 [NewLife.EFBM](https://github.com/cuiwenyuan/NewLife.EFBM) 的自动发布保持一致，本项目采用
+**NewLife 风格四段版本号 `主.次.年.MDD`**（月**不补零**），例如 `1.1.2026.1120` 表示 1.1 基号、
+2026 年 11 月 20 日发布。
 
-- 程序集版本：`AssemblyVersion / FileVersion` = 版本号。
-- 信息版本：`InformationalVersion` = 版本号 + Git commit（如 `1.0.0+6a44d70`），
-  `/admin/status` 的 `version` 字段直接可见，便于线上对账。
+- **基号**（主.次）写在根目录 [`Directory.Build.props`](Directory.Build.props) 的 `VersionPrefix`
+  （当前 `1.1`），只手工维护主版本与次版本。
+- `.年.MDD` 段在发版时自动生成：tag 触发取 tag 去掉 `v`，手动触发可填或按当天日期拼出。
+- 校验闸门：不符合 `主.次.年.MDD` 规则的版本号直接中止发版，不会产出 Release。
+- 程序集版本：`AssemblyVersion / FileVersion` = 完整四段版本号；信息版本由 SDK 自动追加 Git
+  commit（如 `1.1.2026.1120+6a44d70`），`/admin/status` 的 `version` 字段可见，便于线上对账。
 
 ### 发版流程（GitHub Actions 自动）
 
 ```bash
-# 提交代码后，打 tag 并推送（版本号 = tag 去掉 v 前缀）
-git tag v1.0.0
-git push origin v1.0.0
+# 提交代码后，打 tag 并推送（版本号 = tag 去掉 v 前缀，须符合 主.次.年.MDD）
+git tag v1.1.2026.1120
+git push origin v1.1.2026.1120
 ```
 
 推送 `v*` tag 后，[`release.yml`](.github/workflows/release.yml) 自动执行：
 
 1. **构建门禁**：net6.0 + net8.0 + net10.0 三框架 `dotnet build -c Release`，0 错误；
 2. **配置预检门禁**：`--test-config`（等价 `nginx -t`，以 net10.0 产物执行），失败即中止；
-3. **发布打包**：publish net10.0 / net8.0 / net6.0（框架依赖）→
-   `gateway-net10.0-v1.0.0.zip`、`gateway-net8.0-v1.0.0.zip`、`gateway-net6.0-v1.0.0.zip`；
-4. **创建 Release**：上传三个 zip + 自动生成 release notes（tag 间 commits）。
+3. **确定版本**：从 tag 提取版本号并校验 NewLife 规则，失败即中止；
+4. **发布打包**：publish net10.0 / net8.0 / net6.0（框架依赖）→
+   `gateway-net10.0-v1.1.2026.1120.zip`、`gateway-net8.0-v1.1.2026.1120.zip`、
+   `gateway-net6.0-v1.1.2026.1120.zip`；
+5. **创建 Release**：标题 `Gateway v1.1.2026.1120`，上传三个 zip + 自动生成 release notes，
+   并标记为最新（latest）。
 
 ### 部署产物
 
 zip 内为完整发布目录（dll / appsettings.json / web.config / wwwroot），**解压到 IIS 站点目录即
 完成部署**；部署机需安装对应 ASP.NET Core Runtime / Hosting Bundle（框架依赖）。
 
-> 手动触发（不推 tag）：GitHub Actions 页面 → Release workflow → **Run workflow**，
-> 仅执行构建 + 预检门禁，用于日常验证。
+> 手动发版（不推 tag）：GitHub Actions 页面 → Release workflow → **Run workflow**，可填版本号
+> （如 `1.1.2026.1120`）；留空则按基号 + 当天日期自动生成。手动触发同样会创建 Release 与 tag，
+> 且需通过上面全部门禁。
 
 ## 12. 许可证与免责声明
 
