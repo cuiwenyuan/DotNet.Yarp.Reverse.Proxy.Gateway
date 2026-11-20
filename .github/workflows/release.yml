@@ -69,7 +69,7 @@ jobs:
             10.0.x
           dotnet-quality: 'ga'
 
-      - name: Determine version (NewLife rule: major.minor.year.MDD)
+      - name: Determine version (NewLife rule - major.minor.year.MDD)
         id: ver
         shell: pwsh
         run: |
