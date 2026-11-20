@@ -22,17 +22,20 @@ public class AdminStatusMiddleware
     private readonly AdminOptions _options;
     private readonly GatewayMetrics _metrics;
     private readonly GatewayConfigReloader? _reloader;
+    private readonly GatewayHotReload? _hotReload;
 
     public AdminStatusMiddleware(
         RequestDelegate next,
         AdminOptions options,
         GatewayMetrics metrics,
-        GatewayConfigReloader? reloader = null)
+        GatewayConfigReloader? reloader = null,
+        GatewayHotReload? hotReload = null)
     {
         _next = next;
         _options = options;
         _metrics = metrics;
         _reloader = reloader;
+        _hotReload = hotReload;
     }
 
     public async Task Invoke(HttpContext context)
@@ -74,6 +77,14 @@ public class AdminStatusMiddleware
             workingSetMB = Math.Round(Environment.WorkingSet / 1024d / 1024d, 1),
             managedMemoryMB = Math.Round(GC.GetTotalMemory(false) / 1024d / 1024d, 1),
             lastConfigReloadAt = _reloader?.LastReloadAtUtc?.ToString("o"),
+            hotReload = _hotReload is null ? null : new
+            {
+                enabled = true,
+                reloadCount = _hotReload.ReloadCount,
+                lastReloadAt = _hotReload.LastReloadAtUtc?.ToString("o"),
+                lastAttemptAt = _hotReload.LastAttemptAtUtc?.ToString("o"),
+                lastError = _hotReload.LastError
+            },
             metrics = new
             {
                 totalRequests = snapshot.TotalRequests,
@@ -113,7 +124,10 @@ public class AdminStatusMiddleware
             success = ok,
             timestamp = DateTimeOffset.UtcNow,
             message = ok ? "OK" : error,
-            reloaded = new[] { "RateLimit", "IpFilter" }
+            viaHotReload = _hotReload != null,
+            reloaded = _hotReload != null
+                ? new[] { "All Gateway sections (validated + in-place mapped)" }
+                : new[] { "RateLimit", "IpFilter" }
         };
 
         context.Response.StatusCode = ok ? StatusCodes.Status200OK : StatusCodes.Status500InternalServerError;

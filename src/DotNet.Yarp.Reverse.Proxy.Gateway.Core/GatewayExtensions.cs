@@ -32,9 +32,31 @@ public static class GatewayExtensions
         services.AddSingleton(options.Admin);
         services.AddSingleton<SimpleMemoryCache>();
         services.AddSingleton<GatewayMetrics>();
+
+        // 有派生状态的组件：限流器令牌桶、IP 规则集。热重载时会经 ApplyOptions 原地重建。
         services.AddSingleton(new RateLimitState(options.RateLimit));
         services.AddSingleton(new IpFilterState(options.IpFilter));
         services.AddSingleton<GatewayConfigReloader>();
+        return services;
+    }
+
+    /// <summary>
+    /// 注册基于 NewLife.Core 的配置热重载器。由 Web 层在 AddGateway 之后调用，
+    /// 传入 appsettings.json 路径与校验委托（复用 --test-config 的 ConfigValidator）。
+    /// 从 DI 解析已注册的 GatewayOptions / RateLimitState / IpFilterState 单例，保证原地更新同一对象。
+    /// </summary>
+    public static IServiceCollection AddGatewayHotReload(
+        this IServiceCollection services,
+        string configPath,
+        Func<string, (bool ok, string? error)> validate)
+    {
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<GatewayOptions>();
+            var rateLimitState = sp.GetRequiredService<RateLimitState>();
+            var ipFilterState = sp.GetRequiredService<IpFilterState>();
+            return new GatewayHotReload(configPath, options, rateLimitState, ipFilterState, validate);
+        });
         return services;
     }
 

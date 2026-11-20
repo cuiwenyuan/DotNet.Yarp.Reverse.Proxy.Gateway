@@ -3,35 +3,44 @@ using Microsoft.Extensions.Configuration;
 namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 
 /// <summary>
-/// 治理配置热重载器（对应 GoReverseProxy 的管理重载端点）。
-/// 从 IConfiguration 的 "Gateway" 节点重新绑定可热载的配置并应用到共享状态：
-///   - RateLimit（PerMinute / Burst / DelayEnabled / MaxDelayMs）
-///   - IpFilter（Allow / Deny / StatusCode）
-/// 其余配置（认证、缓存、安全头等）仍为启动时绑定。
-/// 由管理端点 POST /admin/reload（仅 localhost）触发。
+/// 治理配置手动重载器（对应 POST /admin/reload 管理端点）。
+///
+/// 仅 localhost 可触发。优先委托给 GatewayHotReload（走校验闸门 + 原地映射 + 派生状态重建）；
+/// 若热重载器未注册（兼容旧行为），则回退到直接从 IConfiguration 重新绑定 RateLimit / IpFilter。
+/// 文件监听失效时（如网络盘、Watcher 被禁用），此端点作为手动兜底。
 /// </summary>
 public sealed class GatewayConfigReloader
 {
     private readonly IConfiguration _configuration;
     private readonly RateLimitState _rateLimitState;
     private readonly IpFilterState _ipFilterState;
+    private readonly GatewayHotReload? _hotReload;
 
     public GatewayConfigReloader(
         IConfiguration configuration,
         RateLimitState rateLimitState,
-        IpFilterState ipFilterState)
+        IpFilterState ipFilterState,
+        GatewayHotReload? hotReload = null)
     {
         _configuration = configuration;
         _rateLimitState = rateLimitState;
         _ipFilterState = ipFilterState;
+        _hotReload = hotReload;
     }
 
     /// <summary>最近一次成功重载时间（UTC），供管理状态端点展示。</summary>
-    public DateTime? LastReloadAtUtc { get; private set; }
+    public DateTime? LastReloadAtUtc => _hotReload?.LastReloadAtUtc;
 
     /// <summary>从配置重新绑定可热载项并应用；成功返回 true。</summary>
     public bool Reload(out string? error)
     {
+        // 热重载器已注册：走统一校验闸门 + 原地映射 + state 重建
+        if (_hotReload != null)
+        {
+            return _hotReload.Reload(out error);
+        }
+
+        // 回退：无热重载器时维持原有行为
         try
         {
             var gateway = _configuration.GetSection("Gateway");
@@ -42,9 +51,6 @@ public sealed class GatewayConfigReloader
             var ipFilter = gateway.GetSection("IpFilter").Get<IpFilterOptions>() ?? new IpFilterOptions();
             _ipFilterState.ApplyOptions(ipFilter);
 
-            LastReloadAtUtc = DateTime.UtcNow;
-            GatewayLogger.Info($"治理配置已热重载：RateLimit(PerMinute={rateLimit.PerMinute},Burst={rateLimit.Burst},Delay={rateLimit.DelayEnabled}) " +
-                               $"IpFilter(Enabled={ipFilter.Enabled},Allow={ipFilter.Allow.Length},Deny={ipFilter.Deny.Length})");
             error = null;
             return true;
         }

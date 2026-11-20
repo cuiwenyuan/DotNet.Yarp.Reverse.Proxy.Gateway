@@ -44,6 +44,16 @@ builder.Services.AddResponseCompression(options =>
 // (2) 自研入口治理组件（限流/跨域/认证/缓存/熔断/重试/JWT/指标/管理端点），纯 BCL + NewLife.Core 实现。
 builder.Services.AddGateway(builder.Configuration);
 
+// (2.1) 配置热重载：基于 NewLife.Core 的 JsonConfigProvider 监听 appsettings.json。
+//       校验委托复用 --test-config 的 ConfigValidator，保证热载配置与启动预检同标准；
+//       非法变更被闸门拦截并保留旧配置，服务不中断。
+var hotReloadConfigPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+builder.Services.AddGatewayHotReload(hotReloadConfigPath, path =>
+{
+    var ok = ConfigValidator.Validate(path, out var error);
+    return (ok, error);
+});
+
 var app = builder.Build();
 
 // 在 IIS / 前置代理后正确还原客户端真实 IP 与协议（对应 nginx 的 set_real_ip / X-Forwarded-*）。

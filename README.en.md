@@ -434,6 +434,22 @@ Example:
 | `ProxyLogging:Json` | `false` | Emit single-line JSON proxy logs (ELK/Loki friendly) |
 | `ProxyLogging:BodyLogRules` | `[]` | Fine-grained body-log rules: `[{PathContains:"/api/login",StatusCodes:[200]}]`; when non-empty only matching requests log the body |
 
+### 8.3 Configuration hot reload (equivalent to nginx -s reload)
+
+Edit and save `appsettings.json` and **all `Gateway` governance settings take effect automatically — no restart, no manual reload**. Built on the already-referenced NewLife.Core; no new dependencies.
+
+| Stage | Mechanism |
+| --- | --- |
+| Change detection | `JsonConfigProvider` (FileSystemWatcher events, ≤1s) + periodic polling fallback (~40s, covers atomic replacement / network drives / watcher failure) |
+| In-place mapping | `ConfigHelper.MapTo` writes new values into the already-injected Options singletons (including nested objects and arrays); middleware holding the references sees new values with zero code changes |
+| Derived-state rebuild | Rate-limit token bucket and IP CIDR rules are rebuilt via `ApplyOptions` in the `Changed` callback |
+| Validation gate | Before applying, the same `ConfigValidator` as `--test-config` runs; invalid config is rejected, the last valid config is kept, `lastError` is recorded, and the service stays up |
+
+- **Routes / clusters** (`ReverseProxy`) keep using YARP's `IConfiguration` reloadOnChange — behavior unchanged.
+- **Manual fallback**: `POST /admin/reload` (localhost only) forces a disk reload through the same validation gate; usable when file watching fails.
+- **Observability**: `GET /admin/status` returns a `hotReload` node with `reloadCount` / `lastReloadAt` / `lastAttemptAt` / `lastError`.
+- **Note**: atomic file replacement (e.g. `sed -i`, "delete-then-write" tools) breaks the watcher handle; in that case the ~40s polling fallback applies. Normal editor saves (in-place writes) take effect in ≤1s.
+
 ## 9. Publish to IIS
 
 See **[System Architecture (English)](docs/Architecture.en.md)** /

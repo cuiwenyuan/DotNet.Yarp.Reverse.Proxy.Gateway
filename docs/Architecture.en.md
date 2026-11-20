@@ -153,48 +153,57 @@ A request passes through the following stages from entry to response:
 | `MetricsMiddleware` | —— | `/metrics` Prometheus text + `/health` probe (Interlocked counters) | No |
 | `AdminStatusMiddleware` | —— | `/admin/status` JSON summary + `POST /admin/reload` (localhost only) | No |
 
-### 4.3 Shared state & hot reload
+### 4.3 Shared state & full configuration hot reload
 
-To support **online updates** of `RateLimit` / `IpFilter`, those two middlewares do not inject the
-startup-bound options singletons — they inject **shared state objects**:
+Governance config supports **full online update** via a **NewLife.Core**-based hot reloader
+(`GatewayHotReload`) — edit and save `appsettings.json` and changes apply automatically, with no
+restart or manual reload.
 
 ```
-appsettings.json ──(edit)──▶ POST /admin/reload
-                                  │
+appsettings.json ──(edit/save)──▶ JsonConfigProvider (Watcher ≤1s / polling ~40s fallback)
+                                  │  IConfigProvider.Changed
                                   ▼
-                     GatewayConfigReloader.Reload()
-                                  │  re-bind config → ApplyOptions()
-                                  ▼
-              RateLimitState (ConcurrentDictionary<IP, bucket>)
-              IpFilterState   (CIDR list, atomically swapped)
+                     GatewayHotReload.ReloadCore()
+                        ① ConfigValidator gate (fail → keep old config + lastError)
+                        ② ConfigHelper.MapTo in-place → all Gateway Options singletons
+                        ③ Derived-state rebuild → RateLimitState / IpFilterState.ApplyOptions()
+
+                     POST /admin/reload (localhost only) ──▶ same ReloadCore (manual fallback)
 ```
 
-- `RateLimitState`: holds a token bucket per client IP; `ApplyOptions` updates rate/capacity/mode
-  while preserving existing IP buckets (in-flight rate limiting is not interrupted).
-- `IpFilterState`: `ApplyOptions` atomically swaps the CIDR list; the next request uses the new rules.
-- All other governance config remains startup-bound singletons — a pool recycle (IIS) or process
-  restart is required after editing.
+- **In-place mapping**: `ConfigHelper.MapTo` writes new values into the already-injected Options
+  singletons (nested objects and arrays keep their references), so every governance middleware sees
+  new values with zero code changes — no longer limited to "state-only injection".
+- **Derived state**: `RateLimitState` (per-IP token buckets) and `IpFilterState` (CIDR list) are
+  still rebuilt in place via `ApplyOptions`; the next request uses the new rules, in-flight buckets
+  are not interrupted.
+- **Validation gate**: the same `ConfigValidator` as `--test-config` runs before applying; invalid
+  config is rejected, the last valid config is kept, `lastError` recorded, and the service stays up
+  (see §6 resilience).
+- **Dual detection**: FileSystemWatcher events (≤1s) + periodic polling fallback (~40s, covers
+  atomic replacement / network drives / watcher failure). Uses only NewLife.Core + BCL, preserving
+  the "two-package" constraint.
 
 ---
 
 ## 5. Configuration model
 
-A single `appsettings.json` with two levels and three application mechanisms:
+A single `appsettings.json` with two levels and two hot-reload mechanisms:
 
 ```
 appsettings.json
 ├── ReverseProxy            ← YARP contract (routes/clusters/health checks/session affinity)
 │                              Applied: YARP auto hot-reload (reloadOnChange)
 └── Gateway                 ← self-built governance (bound to GatewayOptions)
-     ├── RateLimit / IpFilter   Applied: POST /admin/reload hot reload
-     └── other nodes            Applied: pool recycle / restart
+     └── all nodes             Applied: auto hot-reload on save (NewLife.Core + validation gate)
+                                Fallback: POST /admin/reload
 ```
 
 **Design intent**: separate "forwarding config" (changes often: backend scaling, canary, health
-checks) from "governance config" (security policy, changes rarely); and make the two most
-operation-sensitive items — rate limiting and IP filtering — hot-reloadable, balancing security and
-availability. `--test-config` validates both levels before startup/publish (ID uniqueness, address
-validity, governance binding).
+checks) from "governance config" (security policy); both levels support online hot reload.
+`--test-config` validates both levels before startup/publish (ID uniqueness, address validity,
+governance binding), and the hot reload path reuses the same validator as its gate — guaranteeing
+"passes at startup = passes on hot reload".
 
 ---
 
@@ -208,7 +217,9 @@ validity, governance binding).
 | Client traffic spike | `RateLimit` (token bucket) | 429 over quota; `delay` mode queues smoothly |
 | Malicious / oversized requests | AspxBlocker / IpFilter / RequestSize | Short-circuited before forwarding (403/413) |
 | Slow backend responses | Cluster `ActivityTimeout` + connect timeout | Per-request timeout, no connection-pool exhaustion |
-| Broken config | `--test-config` precheck | Fails fast before startup/publish |
+| Broken config (startup/publish) | `--test-config` precheck | Fails fast before startup/publish |
+| Broken config (runtime hot reload) | Hot-reload validation gate | Reuses `ConfigValidator`; rejects invalid change, keeps old config + `lastError`, service stays up |
+| File watcher failure | Polling fallback + `POST /admin/reload` | ~40s polling catches changes, or manual forced reload |
 | Process / deployment issues | IIS app-pool auto-recycle + XTrace logs | 500.31/502.5 diagnosed quickly |
 
 **How rate limit / breaker / retry interact** (no interference):
@@ -244,8 +255,9 @@ Rate limit (ingress control) → Circuit breaker (downstream health) → Retry (
 src/
 ├── DotNet.Yarp.Reverse.Proxy.Gateway.Core/   # Governance layer (pure BCL + NewLife.Core)
 │   ├── GatewayOptions.cs                     # Config binding model (appsettings "Gateway")
-│   ├── GatewayExtensions.cs                  # DI registration + pipeline (AddGateway/UseGatewayGovernance)
-│   ├── GatewayConfigReloader.cs              # Hot reloader (RateLimit/IpFilter)
+│   ├── GatewayExtensions.cs                  # DI registration + pipeline (AddGateway/AddGatewayHotReload/UseGatewayGovernance)
+│   ├── GatewayHotReload.cs                   # Full config hot reloader (NewLife.Core + validation gate + in-place mapping)
+│   ├── GatewayConfigReloader.cs              # Manual fallback reload (POST /admin/reload, delegates to hot reloader)
 │   ├── RateLimitState.cs                     # Rate-limit shared state + middleware (incl. SimpleRateLimiter)
 │   ├── IpFilterState.cs                      # IP allow/deny shared state + middleware
 │   ├── *Middleware.cs                        # Remaining governance/observability middleware

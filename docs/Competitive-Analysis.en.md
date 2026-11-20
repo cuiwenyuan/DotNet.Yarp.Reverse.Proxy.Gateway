@@ -77,7 +77,8 @@ Four to keep an eye on:
 | .NET 10 support | **✅ (6/8/10 multi-target)** | ✅ | ❌ | ✅ | ✅ | N/A | N/A |
 | Minimum Windows Server | **2012 (IIS 8.0)** | depends on .NET | depends on .NET | Linux-first | depends on .NET | 2008+ | poor desktop UX |
 | Governance out of the box (rate limit / breaker / CORS / auth / logging) | **✅ all self-built** | partial (breaker built in) | ✅✅ (plugins) | partial | partial | little | hand-written config |
-| Dashboard / dynamic config | ❌ | ❌ | ✅ | ✅ | ✅ | IIS Manager | ❌ |
+| Dashboard / visual config | ❌ (read-only `/admin/status`) | ❌ | ✅ | ✅ | ✅ | IIS Manager | ❌ |
+| Config hot reload (edit file → live) | **✅ (NewLife.Core + validation gate, ≤1s)** | ❌ | ✅ | ✅ (routes) | Partial | restart needed | `nginx -s reload` |
 | ACME auto-certificates | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | WAF | partial (IP filter) | ❌ | ✅ | IP allow/deny | ❌ | ❌ | ❌ |
 | Service discovery | ❌ | ✅ (many providers) | ✅ (many providers) | ❌ | ❌ | ❌ | ❌ |
@@ -101,7 +102,7 @@ Four to keep an eye on:
 
 | Weakness | Impact | Priority |
 | --- | --- | --- |
-| No Dashboard / dynamic config reload | Table stakes for new competitors; visible ops-experience gap | **High** (start with NuGet-free `IConfiguration` reload + lightweight admin endpoint) |
+| No visual Dashboard | Newcomers mostly ship one; config-file-only ops is plainer | Medium (a lightweight read-only status page is possible; config hot reload is already covered by NewLife.Core, see below) |
 | No WAF / service discovery / ACME | Lose microservice or public-edge comparisons to Aneiang / FastGateway | Medium (drive by demand; don't break the "two packages" rule for features) |
 | Small community | Slow word-of-mouth and contributor growth | Medium (publishing this analysis is itself content marketing) |
 | YARP 3.0 may absorb governance features | Dilutes our self-built-governance value | Watch (2.3.0 is still the latest stable — no short-term threat) |
@@ -113,8 +114,10 @@ Four to keep an eye on:
   Don't describe ourselves as "yet another .NET API gateway" — that's Ocelot's and Aneiang's battlefield.
 - **Short term**: add this analysis to the docs (done); add one line to README §1 noting that existing .NET
   gateways are mostly libraries to integrate or K8s/container-oriented, with no IIS-native turnkey option.
-- **Medium term**: evaluate configuration hot reload (`IOptionsMonitor` / `ChangeToken`, zero new dependencies) —
-  the biggest experience gap versus new competitors, at manageable cost.
+- **Medium term (done)**: **configuration hot reload shipped** — built on the already-referenced
+  NewLife.Core (`JsonConfigProvider` + in-place `MapTo` + validation gate). Saving `appsettings.json`
+  applies all `Gateway` config within ≤1s, with zero new dependencies and without breaking the
+  "two packages" rule; see README §8.3. The remaining medium-term item is a read-only Dashboard.
 - **Long term**: track the YARP 3.0 stable release and the Stella Router pattern; if YARP officially ships
   governance middleware, re-evaluate our positioning.
 

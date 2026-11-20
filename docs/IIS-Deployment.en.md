@@ -278,32 +278,46 @@ Other recommendations:
 
 ## 6. Production configuration
 
-Edit the published `appsettings.json`. Changes take effect via two different mechanisms:
+Edit the published `appsettings.json`. Both config levels apply **automatically on save — no restart
+or app-pool recycle needed**:
 
 | Config node | How it takes effect |
 | --- | --- |
 | `ReverseProxy` (routes/clusters/health checks/session affinity) | **YARP hot-reloads automatically** — no restart (equiv `nginx -s reload`) |
-| `Gateway:RateLimit` / `Gateway:IpFilter` | **`POST /admin/reload` hot reload** — call once after editing, no restart (see 6.1) |
-| Other `Gateway` nodes (CORS/Auth/breaker/logging, etc.) | Bound at startup; **recycle the app pool** to apply |
+| `Gateway` (all governance nodes: rate limit / IP / CORS / auth / breaker / logging, etc.) | **Automatic hot reload** (NewLife.Core Watcher ≤1s + 60s polling fallback) — applies on save (see 6.1) |
 
-> Note: `RateLimit` / `IpFilter` use a shared-state design that supports online updates at runtime;
-> the rest of the governance config remains startup-bound singletons. The two mechanisms are meant to
-> be combined: hot-reload what you can, then recycle the pool for the rest on a change window.
+> Runtime reloads go through the same **validation gate** as `--test-config`: a broken config is
+> rejected and the service keeps running with the last valid config; `lastError` records the reason.
+> A single bad edit can never take the gateway down.
 
-### 6.1 Hot-reload governance config (RateLimit / IpFilter)
+### 6.1 Automatic hot reload (applies on save)
 
-1. Edit `appsettings.json` in the publish folder — change `Gateway:RateLimit` or `Gateway:IpFilter`
-   (e.g. temporarily block an IP).
-2. Call the admin endpoint (**localhost only**, to prevent remote triggering):
+1. **Save in place** with an editor (e.g. change `Gateway:RateLimit:PerMinute`, temporarily block an
+   IP, adjust CORS, etc.) in the publish folder's `appsettings.json`;
+2. It takes effect within ≤1s. Verify with:
+   - Rate limit: the `X-Rate-Limit-Limit` response header reflects the new `PerMinute`;
+   - Status: `hotReload.reloadCount` in `GET http://localhost/admin/status` increments and
+     `lastReloadAt` updates; on validation failure `lastError` is set and `reloadCount` is unchanged.
+
+> Note: atomic file replacement (e.g. `sed -i`, delete-then-write tools) breaks the watcher handle;
+> the ~40s polling fallback then applies. Normal editor saves (in-place writes) take effect in ≤1s.
+
+### 6.2 Manual fallback reload (when file watching fails)
+
+If file watching fails (network drive / permissions), force a disk reload (**localhost only**):
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://localhost/admin/reload"
-# returns {"success":true,"reloaded":["RateLimit","IpFilter"],...}
+# returns {"success":true,"viaHotReload":true,"reloaded":["All Gateway sections (validated + in-place mapped)"],...}
 ```
 
-3. Verify: `lastConfigReloadAt` in `GET http://localhost/admin/status` is updated to the reload time.
+This endpoint uses the same validation gate as automatic reload. Only needed when necessary — normal
+editor saves apply automatically.
 
-### 6.2 Recycle the app pool (for the rest of the Gateway config)
+### 6.3 Recycle the app pool (only when publishing a new version)
+
+Hot reload covers config changes only; **replacing DLLs / publishing a new version** still requires a
+pool recycle to load the new assemblies:
 
 ```powershell
 Restart-WebAppPool -Name "DotNetGatewayAppPool"

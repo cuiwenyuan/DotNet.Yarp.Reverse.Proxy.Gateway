@@ -412,6 +412,22 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | `ProxyLogging:Json` | `false` | 代理日志是否输出单行 JSON（ELK/Loki 友好） |
 | `ProxyLogging:BodyLogRules` | `[]` | 细粒度请求体日志规则：`[{PathContains:"/api/login",StatusCodes:[200]}]`；非空时仅命中（路径包含+状态码）才记录请求体 |
 
+### 8.3 配置热重载（等价 nginx -s reload）
+
+修改 `appsettings.json` 并保存后，**全部 `Gateway` 治理配置自动生效，无需重启、无需手动 reload**。基于已引用的 NewLife.Core 实现，不引入任何新依赖。
+
+| 环节 | 机制 |
+| --- | --- |
+| 变更感知 | `JsonConfigProvider`（FileSystemWatcher 事件驱动，≤1s）+ 定时轮询兜底（~40s，覆盖原子替换 / 网络盘 / watcher 失效） |
+| 原地映射 | `ConfigHelper.MapTo` 把新配置原地写入已注入的 Options 单例（含嵌套对象与数组），持有引用的中间件零改动即见新值 |
+| 派生状态重建 | 限流令牌桶、IP 黑白名单 CIDR 规则集经 `Changed` 回调调 `ApplyOptions` 重建 |
+| 校验闸门 | 应用前先跑与 `--test-config` 相同的 `ConfigValidator`；非法配置被拦截、保留上一份有效配置、记录 `lastError`，服务不中断 |
+
+- **路由/集群**（`ReverseProxy`）仍由 YARP 的 `IConfiguration` reloadOnChange 热加载，行为不变。
+- **手动兜底**：`POST /admin/reload`（仅 localhost）强制从磁盘重载，走同一套校验闸门；文件监听失效时可用。
+- **可观测**：`GET /admin/status` 的 `hotReload` 节点返回 `reloadCount` / `lastReloadAt` / `lastAttemptAt` / `lastError`。
+- **注意**：用"原子替换"方式写文件（如 `sed -i`、部分工具的"先删后写"）会破坏 watcher 句柄，此时依赖 ~40s 定时轮询兜底；用编辑器常规保存（原地写入）可 ≤1s 生效。
+
 ## 9. 发布到 IIS
 
 架构设计见 **[系统架构（中文）](docs/Architecture.zh-CN.md)** /

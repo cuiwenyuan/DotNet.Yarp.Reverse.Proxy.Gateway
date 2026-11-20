@@ -259,30 +259,42 @@ IIS 依据请求的主机名（SNI）自动查找并加载对应 `.pfx`，无需
 
 ## 6. 修改生产配置
 
-编辑发布目录下的 `appsettings.json`。配置生效分两种机制：
+编辑发布目录下的 `appsettings.json`。两级配置**均为保存即自动生效，无需重启或回收应用池**：
 
 | 配置节点 | 生效方式 |
 | --- | --- |
-| `ReverseProxy`（路由/集群/健康检查/会话保持） | **YARP 自动热加载**，改完即生效，无需重启（等价 `nginx -s reload`） |
-| `Gateway:RateLimit` / `Gateway:IpFilter` | **`POST /admin/reload` 热重载**：改完文件后调用一次即可，无需重启（见 6.1） |
-| `Gateway` 其余节点（CORS/Auth/熔断/日志等） | 启动时绑定，需**回收应用池**生效 |
+| `ReverseProxy`（路由/集群/健康检查/会话保持） | **YARP 自动热加载**，改完即生效（等价 `nginx -s reload`） |
+| `Gateway`（全部治理节点：限流/IP/CORS/认证/熔断/日志等） | **自动热重载**（NewLife.Core Watcher ≤1s + 60s 轮询兜底），改完保存即生效（见 6.1） |
 
-> 说明：`RateLimit` / `IpFilter` 采用共享状态（State）设计，支持运行期在线更新；其余治理配置
-> 仍为启动绑定单例。二者混合使用：**先热载能热载的，剩下的再按变更计划回收应用池**。
+> 运行时热载统一经过与 `--test-config` 相同的**校验闸门**：写坏的配置会被拒绝，服务继续用上一份
+> 有效配置运行，`lastError` 记录原因，不会因一次误编辑导致网关中断。
 
-### 6.1 热重载治理配置（RateLimit / IpFilter）
+### 6.1 自动热重载（保存即生效）
 
-1. 编辑发布目录 `appsettings.json`，修改 `Gateway:RateLimit` 或 `Gateway:IpFilter`（例如临时封禁一个 IP）。
-2. 调用管理端点（**仅限 localhost 访问**，防止远程触发）：
+1. 用编辑器**原地保存**发布目录的 `appsettings.json`（如改 `Gateway:RateLimit:PerMinute`、
+   临时封禁 IP、调整 CORS 等）；
+2. ≤1s 内自动生效。可通过响应头或端点验证：
+   - 限流：`curl` 任一请求的 `X-Rate-Limit-Limit` 头反映新 `PerMinute`；
+   - 状态：`GET http://localhost/admin/status` 的 `hotReload.reloadCount` 自增、
+     `lastReloadAt` 更新；校验失败时 `lastError` 有值且 `reloadCount` 不变。
+
+> 注意：若用"原子替换"方式写文件（如 `sed -i`、先删后写的工具）会破坏 Watcher 句柄，此时依赖
+> ~40s 的定时轮询兜底；常规编辑器保存（原地写入）可 ≤1s 生效。
+
+### 6.2 手动兜底重载（文件监听失效时）
+
+若文件监听因网络盘/权限等原因失效，可强制从磁盘重载（**仅限 localhost**）：
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://localhost/admin/reload"
-# 返回 {"success":true,"reloaded":["RateLimit","IpFilter"],...}
+# 返回 {"success":true,"viaHotReload":true,"reloaded":["All Gateway sections (validated + in-place mapped)"],...}
 ```
 
-3. 验证：`GET http://localhost/admin/status` 返回体中的 `lastConfigReloadAt` 会更新为本次时间。
+该端点走与自动热载相同的校验闸门。仅在必要时使用——正常编辑保存会自动生效。
 
-### 6.2 回收应用池（其余 Gateway 配置生效）
+### 6.3 回收应用池（仅发布新版本时）
+
+热重载只覆盖配置变更；**替换 DLL/发布新版本**仍需回收应用池让新程序集加载：
 
 ```powershell
 Restart-WebAppPool -Name "DotNetGatewayAppPool"

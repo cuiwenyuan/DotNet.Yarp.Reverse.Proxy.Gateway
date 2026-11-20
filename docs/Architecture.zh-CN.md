@@ -142,45 +142,50 @@
 | `MetricsMiddleware` | —— | `/metrics` Prometheus 文本 + `/health` 探针（Interlocked 计数） | 否 |
 | `AdminStatusMiddleware` | —— | `/admin/status` JSON 摘要 + `POST /admin/reload`（仅 localhost） | 否 |
 
-### 4.3 共享状态与热重载
+### 4.3 共享状态与全量配置热重载
 
-为实现 `RateLimit` / `IpFilter` 的**在线更新**，这两个中间件不直接注入启动时绑定的 options
-单例，而是注入**共享状态对象**：
+治理配置通过基于 **NewLife.Core** 的热重载器（`GatewayHotReload`）实现**全量在线更新**——
+修改 `appsettings.json` 保存后自动生效，无需重启或手动 reload。
 
 ```
-appsettings.json ──(编辑)──▶ POST /admin/reload
-                                  │
+appsettings.json ──(编辑保存)──▶ JsonConfigProvider（Watcher ≤1s / 轮询 ~40s 兜底）
+                                  │  IConfigProvider.Changed
                                   ▼
-                     GatewayConfigReloader.Reload()
-                                  │  重新绑定配置 → ApplyOptions()
-                                  ▼
-              RateLimitState（ConcurrentDictionary<IP, 桶>）
-              IpFilterState  （CIDR 列表，原子替换）
+                     GatewayHotReload.ReloadCore()
+                        ① ConfigValidator 校验闸门（失败→保留旧配置+lastError）
+                        ② ConfigHelper.MapTo 原地映射 → 全部 Gateway Options 单例
+                        ③ 派生状态重建 → RateLimitState / IpFilterState.ApplyOptions()
+
+                     POST /admin/reload（仅 localhost）──▶ 同一套 ReloadCore（手动兜底）
 ```
 
-- `RateLimitState`：持有每个客户端 IP 的令牌桶；`ApplyOptions` 更新速率/容量/模式，存量 IP 桶
-  保留（不中断在途限流）。
-- `IpFilterState`：`ApplyOptions` 原子替换 CIDR 列表，下一次请求即用新规则。
-- 其余治理配置仍为启动绑定（单例），改后需回收应用池（IIS）或重启进程。
+- **原地映射**：`ConfigHelper.MapTo` 把新配置写入已注入的 Options 单例（嵌套对象与数组均保持
+  对象引用），所有治理中间件零改动即见新值——不再需要"只注入 state 不注入 options"。
+- **派生状态**：`RateLimitState`（每 IP 令牌桶）、`IpFilterState`（CIDR 列表）仍经
+  `ApplyOptions` 原地重建，下一次请求即用新规则；限流在途桶不中断。
+- **校验闸门**：应用前跑与 `--test-config` 相同的 `ConfigValidator`，非法配置被拦截、
+  保留上一份有效配置并记 `lastError`，服务不中断（见 §6 容错）。
+- **双机制感知**：FileSystemWatcher 事件驱动（≤1s）+ 定时轮询兜底（~40s，覆盖原子替换/
+  网络盘/watcher 失效）。代码仅依赖 NewLife.Core + BCL，不破坏"两包"约束。
 
 ---
 
 ## 5. 配置体系
 
-单一 `appsettings.json`，两级配置 + 三种生效机制：
+单一 `appsettings.json`，两级配置 + 两种热加载机制：
 
 ```
 appsettings.json
 ├── ReverseProxy            ← YARP 契约（路由/集群/健康检查/会话保持）
 │                             生效：YARP 自动热加载（reloadOnChange）
 └── Gateway                 ← 自研治理（GatewayOptions 绑定）
-     ├── RateLimit / IpFilter  生效：POST /admin/reload 热重载
-     └── 其余节点              生效：回收应用池 / 重启
+     └── 全部节点              生效：保存即自动热重载（NewLife.Core + 校验闸门）
+                                兜底：POST /admin/reload
 ```
 
-**设计意图**：把"转发配置"（可能频繁调整：后端扩容、灰度、健康检查）与"治理配置"（安全策略，
-变更频率低）分开；且把**最需要在线调整的限流与 IP 过滤**做成可热重载，兼顾安全与可用性。
-`--test-config` 可在启动/发布前校验两级配置（ID 唯一性、地址合法性、治理绑定）。
+**设计意图**：把"转发配置"（可能频繁调整：后端扩容、灰度、健康检查）与"治理配置"（安全策略）
+分开，且两级都支持在线热加载。`--test-config` 在启动/发布前校验两级配置（ID 唯一性、地址
+合法性、治理绑定），热重载时复用同一校验器作为闸门，保证"启动能过 = 热载也能过"。
 
 ---
 
@@ -194,7 +199,9 @@ appsettings.json
 | 客户端洪峰 | `RateLimit`（令牌桶） | 超限 429；`delay` 模式平滑排队 |
 | 恶意/超限请求 | AspxBlocker / IpFilter / RequestSize | 在转发前短路（403/413） |
 | 后端响应慢 | 集群 `ActivityTimeout` + 连接超时 | 单请求超时中断，不拖垮连接池 |
-| 配置写坏 | `--test-config` 预检 | 启动/发布前拦错，失败即退出 |
+| 配置写坏（启动/发布） | `--test-config` 预检 | 启动/发布前拦错，失败即退出 |
+| 配置写坏（运行时热载） | 热重载校验闸门 | 复用 `ConfigValidator`，拒绝非法变更、保留旧配置 + `lastError`，服务不中断 |
+| 文件监听失效 | 定时轮询兜底 + `POST /admin/reload` | ~40s 轮询补检测，或手动强制重载 |
 | 进程/部署异常 | IIS 应用池自动回收 + XTrace 日志 | 500.31/502.5 快速定位 |
 
 **限流/熔断/重试三者关系**（避免互相干扰）：
@@ -228,8 +235,9 @@ appsettings.json
 src/
 ├── DotNet.Yarp.Reverse.Proxy.Gateway.Core/   # 治理层（纯 BCL + NewLife.Core）
 │   ├── GatewayOptions.cs                     # 配置绑定模型（appsettings "Gateway"）
-│   ├── GatewayExtensions.cs                  # DI 注册 + 管线挂载（AddGateway/UseGatewayGovernance）
-│   ├── GatewayConfigReloader.cs              # 热重载器（RateLimit/IpFilter）
+│   ├── GatewayExtensions.cs                  # DI 注册 + 管线挂载（AddGateway/AddGatewayHotReload/UseGatewayGovernance）
+│   ├── GatewayHotReload.cs                   # 全量配置热重载器（NewLife.Core + 校验闸门 + 原地映射）
+│   ├── GatewayConfigReloader.cs              # 手动兜底重载（POST /admin/reload，委托给热重载器）
 │   ├── RateLimitState.cs                     # 限流共享状态 + 中间件（含 SimpleRateLimiter 令牌桶）
 │   ├── IpFilterState.cs                      # IP 黑白名单共享状态 + 中间件
 │   ├── *Middleware.cs                        # 其余治理/观测中间件
