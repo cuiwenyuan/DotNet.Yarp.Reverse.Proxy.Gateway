@@ -491,7 +491,10 @@ dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C:\nginx\nginx.
 - 迁移提示清单（逐条列出需人工复核的指令）；
 - 「备份并合并到 appsettings.json」：自动备份原文件（`.bak.<时间戳>`）后替换 `ReverseProxy` 节点，其他节点保持不变。
 
-构建与运行（需 Windows + .NET 10 SDK）：
+**获取方式（推荐）**：每个 Release 都附带一个独立附件 `nginx-config-converter-gui-win-x64-v<版本>.zip`。
+它是 **self-contained 单文件**程序，解压后双击 `NginxConfigConverter.UI.exe` 即可运行，**无需在机器上预装 .NET / Desktop Runtime**，也不依赖网关本体。
+
+自行构建与运行（可选，需 Windows + .NET 10 SDK）：
 
 ```bash
 dotnet build tools/NginxConfigConverter.UI -c Release
@@ -499,7 +502,7 @@ dotnet build tools/NginxConfigConverter.UI -c Release
 dotnet run --project tools/NginxConfigConverter.UI
 ```
 
-> 该工具仅在 Windows 上可编译（WinForms），不影响网关三框架的 Linux/Windows 构建；网关 Release 包不包含它。
+> 该工具仅在 Windows 上可编译（WinForms），不影响网关三框架的 Linux/Windows 构建；它作为**独立附件**发布，不在网关本体 zip 内。
 > 合并后请用 `--test-config` 预检并重启服务。
 
 ## 9. 发布到 IIS

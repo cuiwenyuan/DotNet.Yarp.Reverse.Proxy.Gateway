@@ -129,6 +129,25 @@ jobs:
           Compress-Archive -Path "artifacts/net6.0/*" -DestinationPath "gateway-net6.0-v$ver.zip"
           Get-ChildItem -Path *.zip | Select-Object Name, Length
 
+      - name: Publish & package nginx.conf converter GUI (self-contained single-file win-x64)
+        shell: pwsh
+        run: |
+          # 独立桌面工具：self-contained 单文件发布，运维解压即用，不要求目标机
+          # 预装 .NET 10 Desktop Runtime（避免只装了 ASP.NET Core Runtime 的坑）。
+          # EnableCompressionInSingleFile 把体积从 ~111MB 压到 ~50MB。
+          dotnet publish tools/NginxConfigConverter.UI `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:Version=${{ steps.ver.outputs.version }} `
+            -p:DebugType=none -p:DebugSymbols=false `
+            -o artifacts/gui-win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'GUI publish failed' }
+          # 单文件发布只产出一个 exe（deps/runtimeconfig 已内嵌），显式指定避免带入无关文件。
+          $guiZip = "nginx-config-converter-gui-win-x64-v${{ steps.ver.outputs.version }}.zip"
+          Compress-Archive -Path "artifacts/gui-win-x64/NginxConfigConverter.UI.exe" -DestinationPath $guiZip
+          Get-Item $guiZip | Select-Object Name, Length
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -141,3 +160,4 @@ jobs:
             gateway-net10.0-v${{ steps.ver.outputs.version }}.zip
             gateway-net8.0-v${{ steps.ver.outputs.version }}.zip
             gateway-net6.0-v${{ steps.ver.outputs.version }}.zip
+            nginx-config-converter-gui-win-x64-v${{ steps.ver.outputs.version }}.zip

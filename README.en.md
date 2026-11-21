@@ -512,7 +512,10 @@ When you prefer not to use the command line, a WinForms desktop tool is included
 - A migration-notes checklist (each item needing manual review);
 - "Backup & merge into appsettings.json": backs up the original (`.bak.<timestamp>`) then replaces the `ReverseProxy` node, leaving other nodes untouched.
 
-Build & run (Windows + .NET 10 SDK required):
+**Get it (recommended)**: every Release includes a separate asset `nginx-config-converter-gui-win-x64-v<version>.zip`.
+It is a **self-contained single-file** app — just unzip and double-click `NginxConfigConverter.UI.exe`. **No .NET / Desktop Runtime needs to be installed** on the machine, and it does not depend on the gateway itself.
+
+Build & run yourself (optional, Windows + .NET 10 SDK required):
 
 ```bash
 dotnet build tools/NginxConfigConverter.UI -c Release
@@ -520,7 +523,7 @@ dotnet build tools/NginxConfigConverter.UI -c Release
 dotnet run --project tools/NginxConfigConverter.UI
 ```
 
-> This tool only builds on Windows (WinForms); it does not affect the gateway's Linux/Windows multi-target build, and is not included in gateway release packages.
+> This tool only builds on Windows (WinForms); it does not affect the gateway's Linux/Windows multi-target build. It ships as a **separate Release asset**, not inside the gateway zip.
 > After merging, run `--test-config` and restart the service.
 
 ## 9. Publish to IIS
