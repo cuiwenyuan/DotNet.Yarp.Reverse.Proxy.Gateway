@@ -23,6 +23,8 @@ public class GatewayOptions
     public MetricsOptions Metrics { get; set; } = new();
     public HttpTimeoutOptions HttpTimeout { get; set; } = new();
     public AdminOptions Admin { get; set; } = new();
+    /// <summary>nginx 兼容访问日志（combined/common 格式 + 文件轮转）。</summary>
+    public NginxAccessLogOptions NginxAccessLog { get; set; } = new();
 }
 
 public class RateLimitOptions

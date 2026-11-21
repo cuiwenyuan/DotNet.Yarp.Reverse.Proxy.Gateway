@@ -9,6 +9,8 @@
 > [IIS Deployment Guide](IIS-Deployment.en.md) ·
 > **中文版： [nginx → 网关 迁移对照文档](Nginx-to-Gateway-Migration.md)**
 
+> **Faster migration**: use the built-in converter `--convert-nginx <nginx.conf> [-o out.json]` to turn `upstream`, `server_name`, and `location`/`proxy_pass` into a YARP routes/clusters skeleton automatically, then fine-tune against this guide (variable headers, TLS, `root`, etc. need manual work and are listed in `GatewayMigrationHints`). See [README §8.4](../README.en.md#84-nginx-migration-toolkit).
+
 ---
 
 ## 1. Sanitized summary of the source config

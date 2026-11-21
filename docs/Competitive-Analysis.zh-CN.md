@@ -111,7 +111,11 @@
   "现有 .NET 网关多为需要自行集成的库或面向 K8s/容器，缺少 IIS 原生成品"。
 - **中期（已完成）**：**配置热重载已落地**——基于已引用的 NewLife.Core（`JsonConfigProvider`
   + `MapTo` 原地映射 + 校验闸门），保存 `appsettings.json` 即全量 `Gateway` 配置 ≤1s 生效，
-  零新依赖、不破坏"两包"铁律；详见 README §8.3。剩余中期项是只读 Dashboard / 状态页。
+  零新依赖、不破坏"两包"铁律；详见 README §8.3。
+- **中期（2026-11-21 新增，已完成）**：**nginx 迁移套件落地**——`--convert-nginx` 把 nginx.conf
+  自动转成 YARP 路由/集群骨架，加上可选的 nginx combined/common 兼容访问日志（复用 GoAccess/ELK）。
+  两项均纯 BCL、零新依赖，进一步拓宽了"替换 nginx 的完整路径"这条竞品无一提供的护城河；
+  详见 README §8.4。剩余中期项是只读 Dashboard / 状态页。
 - **长期**：跟踪 YARP 3.0 正式版与 Stella Router 范式；若 YARP 官方开始内置治理中间件，
   重新评估本项目定位。
 

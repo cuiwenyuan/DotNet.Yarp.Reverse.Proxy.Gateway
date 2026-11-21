@@ -98,6 +98,8 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 | 静态文件托管 | `wwwroot` 目录静态资源 | `location { root }` |
 | WebSocket / gRPC 透传 | YARP 原生支持 | `proxy_http_version 1.1` + Upgrade |
 | 转发头还原 | 还原真实客户端 IP / 协议 | `set_real_ip` / `X-Forwarded-*` |
+| **nginx.conf 迁移转换** | `--convert-nginx` 把 nginx 配置自动转成 YARP 路由/集群（含 upstream 权重、Host、路径改写） | 配置迁移工具 |
+| **nginx 兼容访问日志** | 可选输出 combined/common 标准格式、按大小轮转，复用既有 GoAccess/ELK 体系 | `access_log` / `log_format` |
 
 ## 3. 技术栈与依赖约束
 
@@ -106,7 +108,7 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 | 包 / 引用 | 作用 | 类型 |
 | --- | --- | --- |
 | `Yarp.ReverseProxy` 2.3.0 | 微软官方反向代理内核 | 第三方 NuGet（允许） |
-| `NewLife.Core` 11.18.2026.801 | 日志（XTrace）、配置、缓存基础设施 | 第三方 NuGet（允许，唯一额外第三方） |
+| `NewLife.Core` 12.0.2026.1024 | 日志（XTrace）、配置、缓存基础设施 | 第三方 NuGet（允许，唯一额外第三方） |
 | `Microsoft.AspNetCore.App` | ASP.NET Core 共享框架（HttpContext / 中间件等） | FrameworkReference（**非** NuGet） |
 | 其余全部 | 限流、缓存、认证、CORS、扩展名拦截、日志等 | 纯 C# BCL 自研 |
 
@@ -273,6 +275,7 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 
 ```
 请求 → UseForwardedHeaders（还原 X-Forwarded-*）
+     → NginxAccessLogMiddleware（可选：nginx combined/common 访问日志，统计压缩后字节）
      → MetricsMiddleware（最外层：/metrics 与 /health 短路，统计全部请求）
      → UseResponseCompression（gzip 压缩，日志/重试在内层记录原始字节）
      → ProxyLoggingMiddleware（记录请求/响应详情）
@@ -412,6 +415,12 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | `ProxyLogging:IgnoreStatusCodes` | `[]` | 命中这些状态码的请求不写日志（如填 `304`） |
 | `ProxyLogging:Json` | `false` | 代理日志是否输出单行 JSON（ELK/Loki 友好） |
 | `ProxyLogging:BodyLogRules` | `[]` | 细粒度请求体日志规则：`[{PathContains:"/api/login",StatusCodes:[200]}]`；非空时仅命中（路径包含+状态码）才记录请求体 |
+| `NginxAccessLog:Enabled` | `false` | 是否启用 nginx 兼容访问日志（默认关，避免与 ProxyLogging 重复） |
+| `NginxAccessLog:Format` | `combined` | `combined`（含 referer/user-agent）或 `common` |
+| `NginxAccessLog:Path` | `logs/access.log` | 日志文件路径，相对路径基于发布目录 |
+| `NginxAccessLog:MaxFileBytes` | `10485760` | 单文件轮转阈值（字节），0=不轮转；超限滚动为 `.1`/`.2` |
+| `NginxAccessLog:RetainedFiles` | `5` | 保留的历史轮转文件数 |
+| `NginxAccessLog:IgnoreStatusCodes` | `[]` | 命中这些状态码的请求不写访问日志 |
 
 ### 8.3 配置热重载（等价 nginx -s reload）
 
@@ -428,6 +437,50 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 - **手动兜底**：`POST /admin/reload`（仅 localhost）强制从磁盘重载，走同一套校验闸门；文件监听失效时可用。
 - **可观测**：`GET /admin/status` 的 `hotReload` 节点返回 `reloadCount` / `lastReloadAt` / `lastAttemptAt` / `lastError`。
 - **注意**：用"原子替换"方式写文件（如 `sed -i`、部分工具的"先删后写"）会破坏 watcher 句柄，此时依赖 ~40s 定时轮询兜底；用编辑器常规保存（原地写入）可 ≤1s 生效。
+
+### 8.4 nginx 迁移套件
+
+从 nginx 迁移时两个高频痛点——**配置改写**与**日志格式断裂**——由两个纯 BCL 工具解决，不引入任何新依赖。
+
+**（1）nginx.conf 自动转换（`--convert-nginx`）**
+
+把现有 `nginx.conf` 转成 YARP 的 `ReverseProxy` JSON 片段，大幅降低改写工作量：
+
+```bash
+# 输出到 stdout（查看）
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C:\nginx\nginx.conf
+
+# 输出到文件，再把其中 ReverseProxy 节点合并进 appsettings.json
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C:\nginx\nginx.conf -o converted.json
+```
+
+自动映射规则：
+
+| nginx | 转换结果 |
+| --- | --- |
+| `upstream` 的多个 `server` + `weight=N` | 集群 Destinations + `Metadata.Weight` + `LoadBalancingPolicy: Weighted` |
+| `server_name` | 路由 `Match.Hosts` |
+| `location /api/` + `proxy_pass http://pool` | 路由 `Match.Path: /api/{**catch-all}` + `ClusterId` |
+| `proxy_pass http://host:port/v1/`（带 URI） | `PathRemovePrefix` + `PathPrefix` 变换 |
+| 静态值的 `proxy_set_header X Y` | YARP `RequestHeader` / `Set` 变换 |
+| `down` 节点 / `unix:` socket | 自动跳过并提示 |
+
+> 不能静态等价的指令（正则 location、`$变量`、TLS 证书、`root`、`rewrite`、限流等）会写入输出 JSON 的
+> `GatewayMigrationHints` 节点和 stderr，供人工复核；该节点不参与运行配置，合并时忽略即可。
+> 转换后务必用 `--test-config` 校验，并按 [迁移对照文档](docs/Nginx-to-Gateway-Migration.md) 逐项确认。
+
+**（2）nginx 兼容访问日志（`Gateway:NginxAccessLog`）**
+
+开启后输出标准 combined 格式，可直接复用现有 GoAccess / ELK 报表，迁移前后观测口径一致：
+
+```
+127.0.0.1 - - [21/Nov/2026:21:30:01 +0800] "GET /api/test?x=1 HTTP/1.1" 200 342 "http://ref.test/" "curl/8.22.0"
+```
+
+- 挂在压缩外层，`$body_bytes_sent` 统计的是发给客户端的实际字节；升级请求（WebSocket/gRPC）记为 0。
+- 按 `MaxFileBytes` 大小轮转，保留 `RetainedFiles` 份；路径默认发布目录下 `logs/access.log`。
+- 与 `ProxyLogging`（详情/请求体日志）互补：前者给通用日志分析，后者给排障详情，可同时开启。
+- 变更开关/格式/忽略码可随 8.3 热重载即时生效；**修改 `Path` 需重启**以重建写入器。
 
 ## 9. 发布到 IIS
 

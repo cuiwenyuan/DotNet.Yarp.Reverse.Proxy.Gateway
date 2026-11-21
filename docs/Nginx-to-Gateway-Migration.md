@@ -8,6 +8,11 @@
 > [IIS 部署指南（中文）](IIS-Deployment.zh-CN.md) ·
 > **English version: [nginx → Gateway Migration Guide](Nginx-to-Gateway-Migration.en.md)**
 
+> **加速迁移**：可用内置转换工具 `--convert-nginx <nginx.conf> [-o out.json]` 先把 `upstream`、
+> `server_name`、`location`/`proxy_pass` 自动转成 YARP 路由/集群骨架，再按本文档逐项校正
+> （变量头、TLS、`root` 等需人工处理的部分会在 `GatewayMigrationHints` 中列出）。详见
+> [README §8.4](../README.md#84-nginx-迁移套件)。
+
 ---
 
 ## 1. 源配置脱敏摘要

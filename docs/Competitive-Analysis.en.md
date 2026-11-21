@@ -117,7 +117,12 @@ Four to keep an eye on:
 - **Medium term (done)**: **configuration hot reload shipped** — built on the already-referenced
   NewLife.Core (`JsonConfigProvider` + in-place `MapTo` + validation gate). Saving `appsettings.json`
   applies all `Gateway` config within ≤1s, with zero new dependencies and without breaking the
-  "two packages" rule; see README §8.3. The remaining medium-term item is a read-only Dashboard.
+  "two packages" rule; see README §8.3.
+- **Medium term (added 2026-11-21, done)**: **nginx migration toolkit shipped** — `--convert-nginx`
+  automatically turns nginx.conf into a YARP routes/clusters skeleton, plus optional nginx
+  combined/common access logs (reusing GoAccess/ELK). Both are pure BCL with zero new dependencies,
+  further widening the "complete nginx replacement path" moat that no competitor offers;
+  see README §8.4. The remaining medium-term item is a read-only Dashboard.
 - **Long term**: track the YARP 3.0 stable release and the Stella Router pattern; if YARP officially ships
   governance middleware, re-evaluate our positioning.
 

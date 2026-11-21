@@ -104,6 +104,8 @@ and hard to fold into one unified operations system.
 | Static file hosting | `wwwroot` static assets | `location { root }` |
 | WebSocket / gRPC pass-through | Native YARP support | `proxy_http_version 1.1` + Upgrade |
 | Forwarded-header restore | Restore real client IP / scheme | `set_real_ip` / `X-Forwarded-*` |
+| **nginx.conf migration converter** | `--convert-nginx` turns nginx config into YARP routes/clusters (upstream weights, Hosts, path rewrites) | config migration tool |
+| **nginx-compatible access log** | Optional combined/common format with size-based rotation; reuse existing GoAccess/ELK stacks | `access_log` / `log_format` |
 
 ## 3. Tech stack & dependency constraints
 
@@ -113,7 +115,7 @@ implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in fr
 | Package / Reference | Role | Type |
 | --- | --- | --- |
 | `Yarp.ReverseProxy` 2.3.0 | Microsoft's official reverse-proxy core | 3rd-party NuGet (allowed) |
-| `NewLife.Core` 11.18.2026.801 | Logging (XTrace), config, cache infra | 3rd-party NuGet (allowed, only extra 3rd-party) |
+| `NewLife.Core` 12.0.2026.1024 | Logging (XTrace), config, cache infra | 3rd-party NuGet (allowed, only extra 3rd-party) |
 | `Microsoft.AspNetCore.App` | ASP.NET Core shared framework (HttpContext / middleware, etc.) | FrameworkReference (**not** NuGet) |
 | Everything else | Rate limit, cache, auth, CORS, ext block, logging | Pure C# BCL |
 
@@ -293,6 +295,7 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # Repo root (local work dir may be named Do
 
 ```
 Request → UseForwardedHeaders (restore X-Forwarded-*)
+        → NginxAccessLogMiddleware (optional: nginx combined/common access log, counts compressed bytes)
         → MetricsMiddleware (outermost: short-circuit /metrics & /health, count all requests)
         → UseResponseCompression (gzip; logging/retry inside record original bytes)
         → ProxyLoggingMiddleware (log request/response details)
@@ -434,6 +437,12 @@ Example:
 | `ProxyLogging:IgnoreStatusCodes` | `[]` | Skip logging for these status codes (e.g. `304`) |
 | `ProxyLogging:Json` | `false` | Emit single-line JSON proxy logs (ELK/Loki friendly) |
 | `ProxyLogging:BodyLogRules` | `[]` | Fine-grained body-log rules: `[{PathContains:"/api/login",StatusCodes:[200]}]`; when non-empty only matching requests log the body |
+| `NginxAccessLog:Enabled` | `false` | Enable nginx-compatible access log (off by default to avoid overlap with ProxyLogging) |
+| `NginxAccessLog:Format` | `combined` | `combined` (with referer/user-agent) or `common` |
+| `NginxAccessLog:Path` | `logs/access.log` | Log file path; relative paths are based on the publish directory |
+| `NginxAccessLog:MaxFileBytes` | `10485760` | Rotation threshold in bytes; 0 = no rotation; rolls over to `.1`/`.2` |
+| `NginxAccessLog:RetainedFiles` | `5` | Number of rotated files to keep |
+| `NginxAccessLog:IgnoreStatusCodes` | `[]` | Requests with these status codes are not written to the access log |
 
 ### 8.3 Configuration hot reload (equivalent to nginx -s reload)
 
@@ -450,6 +459,49 @@ Edit and save `appsettings.json` and **all `Gateway` governance settings take ef
 - **Manual fallback**: `POST /admin/reload` (localhost only) forces a disk reload through the same validation gate; usable when file watching fails.
 - **Observability**: `GET /admin/status` returns a `hotReload` node with `reloadCount` / `lastReloadAt` / `lastAttemptAt` / `lastError`.
 - **Note**: atomic file replacement (e.g. `sed -i`, "delete-then-write" tools) breaks the watcher handle; in that case the ~40s polling fallback applies. Normal editor saves (in-place writes) take effect in ≤1s.
+
+### 8.4 nginx migration toolkit
+
+Two high-friction migration pain points — **config rewriting** and **log-format breakage** — are solved by two pure-BCL tools with no new dependencies.
+
+**(1) nginx.conf converter (`--convert-nginx`)**
+
+Converts an existing `nginx.conf` into a YARP `ReverseProxy` JSON fragment, greatly reducing rewrite effort:
+
+```bash
+# Output to stdout (preview)
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C:\nginx\nginx.conf
+
+# Output to a file, then merge its ReverseProxy node into appsettings.json
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C:\nginx\nginx.conf -o converted.json
+```
+
+Automatic mappings:
+
+| nginx | Conversion result |
+| --- | --- |
+| Multiple `server` in `upstream` with `weight=N` | Cluster Destinations + `Metadata.Weight` + `LoadBalancingPolicy: Weighted` |
+| `server_name` | Route `Match.Hosts` |
+| `location /api/` + `proxy_pass http://pool` | Route `Match.Path: /api/{**catch-all}` + `ClusterId` |
+| `proxy_pass http://host:port/v1/` (with URI) | `PathRemovePrefix` + `PathPrefix` transforms |
+| Static-value `proxy_set_header X Y` | YARP `RequestHeader` / `Set` transform |
+| `down` nodes / `unix:` sockets | Skipped with a note |
+
+> Directives that cannot be statically equivalent (regex locations, `$variables`, TLS certs, `root`, `rewrite`, rate limits, etc.) are written to the output JSON's `GatewayMigrationHints` node and to stderr for manual review; that node is not part of the runtime config and can be ignored when merging.
+> Always validate with `--test-config` after converting, and confirm each item against the [migration guide](docs/Nginx-to-Gateway-Migration.en.md).
+
+**(2) nginx-compatible access log (`Gateway:NginxAccessLog`)**
+
+When enabled, emits standard combined format so existing GoAccess / ELK dashboards keep working — identical observability before and after migration:
+
+```
+127.0.0.1 - - [21/Nov/2026:21:30:01 +0800] "GET /api/test?x=1 HTTP/1.1" 200 342 "http://ref.test/" "curl/8.22.0"
+```
+
+- Mounted outside compression, so `$body_bytes_sent` counts bytes actually sent to the client; upgrade requests (WebSocket/gRPC) count as 0.
+- Rotates by `MaxFileBytes` size, keeping `RetainedFiles` copies; default path is `logs/access.log` under the publish directory.
+- Complements `ProxyLogging` (details/body logs): this one feeds general log analysis, the other feeds troubleshooting; both can be enabled together.
+- Toggle / format / ignore codes take effect via the 8.3 hot reload; **changing `Path` requires a restart** to rebuild the writer.
 
 ## 9. Publish to IIS
 

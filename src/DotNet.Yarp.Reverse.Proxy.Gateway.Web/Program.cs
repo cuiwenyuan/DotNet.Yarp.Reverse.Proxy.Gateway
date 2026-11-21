@@ -1,3 +1,4 @@
+using System.Text;
 using DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 using DotNet.Yarp.Reverse.Proxy.Gateway.Web;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -13,6 +14,46 @@ if (args.Contains("--test-config") || args.Contains("-t"))
     var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
     var ok = ConfigValidator.Validate(configPath, out var configError);
     Console.WriteLine(ok ? "Configuration OK" : $"Configuration error: {configError}");
+    return;
+}
+
+// (0.5) nginx.conf 转换模式（等价 nginx 配置迁移工具）：
+//   dotnet ...dll --convert-nginx <nginx.conf> [-o <output.json>]
+//   默认输出到 stdout；指定 -o 则写入文件。转换结果含 ReverseProxy 节点与人工复核提示。
+var convertIdx = Array.FindIndex(args, a => a.Equals("--convert-nginx", StringComparison.OrdinalIgnoreCase));
+if (convertIdx >= 0)
+{
+    var inputPath = convertIdx + 1 < args.Length ? args[convertIdx + 1] : null;
+    var outIdx = Array.FindIndex(args, a => a.Equals("-o", StringComparison.OrdinalIgnoreCase));
+    var outputPath = outIdx >= 0 && outIdx + 1 < args.Length ? args[outIdx + 1] : null;
+    if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
+    {
+        Console.Error.WriteLine("Usage: --convert-nginx <nginx.conf> [-o <output.json>]");
+        Console.Error.WriteLine($"Input file not found: {inputPath}");
+        Environment.ExitCode = 2;
+        return;
+    }
+    try
+    {
+        var text = File.ReadAllText(inputPath);
+        var result = GatewayExtensions.ConvertNginxConfig(text);
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            Console.WriteLine(result.Json);
+        }
+        else
+        {
+            File.WriteAllText(outputPath, result.Json, new UTF8Encoding(false));
+            Console.WriteLine($"Converted {result.RouteCount} route(s), {result.ClusterCount} cluster(s) -> {outputPath}");
+        }
+        Console.Error.WriteLine($"Migration notes ({result.Notes.Count}):");
+        foreach (var note in result.Notes) Console.Error.WriteLine("  - " + note);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("Conversion failed: " + ex.Message);
+        Environment.ExitCode = 1;
+    }
     return;
 }
 
@@ -61,6 +102,9 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost
 });
+
+// (2.4) nginx 兼容访问日志（可选）：挂在压缩外层，记录压缩后字节数，统计全部请求。
+app.UseGatewayAccessLog();
 
 // (2.5) 监控指标（最外层）：/metrics 与 /health 短路返回，并统计全部请求。
 app.UseGatewayMetrics();

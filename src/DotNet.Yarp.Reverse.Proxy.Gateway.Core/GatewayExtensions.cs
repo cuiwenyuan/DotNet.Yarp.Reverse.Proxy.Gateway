@@ -30,6 +30,8 @@ public static class GatewayExtensions
         services.AddSingleton(options.Metrics);
         services.AddSingleton(options.HttpTimeout);
         services.AddSingleton(options.Admin);
+        services.AddSingleton(options.NginxAccessLog);
+        services.AddSingleton<NginxAccessLogWriter>();
         services.AddSingleton<SimpleMemoryCache>();
         services.AddSingleton<GatewayMetrics>();
 
@@ -86,6 +88,24 @@ public static class GatewayExtensions
     public static IApplicationBuilder UseGatewayAdmin(this IApplicationBuilder app)
     {
         return app.UseMiddleware<AdminStatusMiddleware>();
+    }
+
+    /// <summary>
+    /// nginx 兼容访问日志中间件（combined/common 格式）。应挂载在 ForwardedHeaders 之后、
+    /// 治理/压缩之外层，以还原真实客户端 IP 并记录全部请求。默认关闭，由配置开关控制。
+    /// </summary>
+    public static IApplicationBuilder UseGatewayAccessLog(this IApplicationBuilder app)
+    {
+        return app.UseMiddleware<NginxAccessLogMiddleware>();
+    }
+
+    /// <summary>
+    /// nginx.conf 转换工具：把 nginx 配置转换为 YARP ReverseProxy JSON 片段。
+    /// 供 Web 宿主在 --convert-nginx 命令行模式下调用（纯 BCL，不依赖 YARP）。
+    /// </summary>
+    public static NginxConversionResult ConvertNginxConfig(string nginxConfText)
+    {
+        return NginxConfigConverter.Convert(nginxConfText);
     }
 
     /// <summary>
