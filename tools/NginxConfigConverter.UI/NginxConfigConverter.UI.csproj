@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 复用网关 Core 类库里的转换器源码（纯 BCL，无第三方依赖）。
+         采用源码链接而非项目引用，避免把 NewLife.Core / ASP.NET Core 运行时
+         拖进这个独立工具，使其可发布为单个轻量 exe。始终与网关共用同一份解析逻辑。 -->
+    <Compile Include="..\..\src\DotNet.Yarp.Reverse.Proxy.Gateway.Core\NginxConfigConverter.cs"
+             Link="NginxConfigConverter.cs" />
+  </ItemGroup>
+
+</Project>

@@ -503,6 +503,26 @@ When enabled, emits standard combined format so existing GoAccess / ELK dashboar
 - Complements `ProxyLogging` (details/body logs): this one feeds general log analysis, the other feeds troubleshooting; both can be enabled together.
 - Toggle / format / ignore codes take effect via the 8.3 hot reload; **changing `Path` requires a restart** to rebuild the writer.
 
+**(3) GUI tool (`tools/NginxConfigConverter.UI`)**
+
+When you prefer not to use the command line, a WinForms desktop tool is included in the repo (separate project, added to the solution). It reuses the **same converter source** as the CLI (source-linked, zero third-party NuGet) and supports:
+
+- Dual input: pick a file or paste config text;
+- One-click copy JSON / save to file;
+- A migration-notes checklist (each item needing manual review);
+- "Backup & merge into appsettings.json": backs up the original (`.bak.<timestamp>`) then replaces the `ReverseProxy` node, leaving other nodes untouched.
+
+Build & run (Windows + .NET 10 SDK required):
+
+```bash
+dotnet build tools/NginxConfigConverter.UI -c Release
+# Run: double-click NginxConfigConverter.UI.exe under bin/Release/net10.0-windows, or:
+dotnet run --project tools/NginxConfigConverter.UI
+```
+
+> This tool only builds on Windows (WinForms); it does not affect the gateway's Linux/Windows multi-target build, and is not included in gateway release packages.
+> After merging, run `--test-config` and restart the service.
+
 ## 9. Publish to IIS
 
 See **[System Architecture (English)](docs/Architecture.en.md)** /

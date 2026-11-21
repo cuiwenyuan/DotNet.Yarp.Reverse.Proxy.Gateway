@@ -482,6 +482,26 @@ dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C:\nginx\nginx.
 - 与 `ProxyLogging`（详情/请求体日志）互补：前者给通用日志分析，后者给排障详情，可同时开启。
 - 变更开关/格式/忽略码可随 8.3 热重载即时生效；**修改 `Path` 需重启**以重建写入器。
 
+**（3）图形界面工具（`tools/NginxConfigConverter.UI`）**
+
+不想敲命令行时，可用随仓库提供的 WinForms 桌面工具（独立项目，已加入解决方案）。它复用与命令行**同一份转换源码**（源码链接，零第三方 NuGet），支持：
+
+- 文件选择 / 直接粘贴配置双模式；
+- 一键复制 JSON、另存为文件；
+- 迁移提示清单（逐条列出需人工复核的指令）；
+- 「备份并合并到 appsettings.json」：自动备份原文件（`.bak.<时间戳>`）后替换 `ReverseProxy` 节点，其他节点保持不变。
+
+构建与运行（需 Windows + .NET 10 SDK）：
+
+```bash
+dotnet build tools/NginxConfigConverter.UI -c Release
+# 运行：进入 bin/Release/net10.0-windows 双击 NginxConfigConverter.UI.exe，或：
+dotnet run --project tools/NginxConfigConverter.UI
+```
+
+> 该工具仅在 Windows 上可编译（WinForms），不影响网关三框架的 Linux/Windows 构建；网关 Release 包不包含它。
+> 合并后请用 `--test-config` 预检并重启服务。
+
 ## 9. 发布到 IIS
 
 架构设计见 **[系统架构（中文）](docs/Architecture.zh-CN.md)** /
