@@ -82,13 +82,13 @@
 ```
 ① 进入 → IIS/ANCM → Kestrel
 ② UseForwardedHeaders：还原 X-Forwarded-For/Proto/Host（真实客户端 IP 与协议）
-③ MetricsMiddleware：计数/计时（/metrics、/health 短路返回）
+③ MetricsMiddleware：计数/计时（/metrics、/health 短路返回；同时汇总限流/并发/熔断/缓存/重试治理计数）
 ④ ResponseCompression：gzip（日志在内层记录原始字节）
 ⑤ ProxyLogging：记录请求/响应详情（可选 JSON、BodyLogRules 细粒度控制）
 ⑥ RetryMiddleware：幂等请求失败时重跑下游管线（换节点）
 ⑦ 治理组（UseGatewayGovernance，由外到内）：
    AspxBlocker(扩展名黑名单) → SecurityHeaders(安全头) → IpFilter(IP黑白名单)
-   → RequestSize(体积限制) → CORS → RateLimit(限流) → CircuitBreaker(熔断)
+   → RequestSize(体积限制) → CORS → RateLimit(限流) → ConcurrencyLimit(并发上限) → CircuitBreaker(熔断)
    → ApiKeyAuth → JwtAuth → ResponseCache(缓存) → LocationRewrite(Location改写)
 ⑧ FileServer：wwwroot 静态文件
 ⑨ YARP：路由匹配 → 负载均衡（RoundRobin/Weighted/...）→ 转发后端
@@ -139,8 +139,15 @@
 | `LocationRewriteMiddleware` | —— | 3xx 响应的 Location 改写（请求主机替换或显式规则） | 否 |
 | `RetryMiddleware` | —— | 幂等方法 + 502/504/连接错误时重跑下游（限 1 次防风暴） | 否 |
 | `ProxyLoggingMiddleware` | —— | 方法/URL/IP/耗时/状态码/请求体/响应体；JSON 输出；BodyLogRules 细粒度 | 否 |
-| `MetricsMiddleware` | —— | `/metrics` Prometheus 文本 + `/health` 探针（Interlocked 计数） | 否 |
-| `AdminStatusMiddleware` | —— | `/admin/status` JSON 摘要 + `POST /admin/reload`（仅 localhost） | 否 |
+| `MetricsMiddleware` | —— | `/metrics` Prometheus 文本 + `/health` 探针；基础请求计数 + 限流/并发/熔断/缓存/重试治理计数（Interlocked） | 否 |
+| `AdminStatusMiddleware` | —— | `/admin/status` JSON 摘要（含 `governance` 节点）+ `POST /admin/reload`（仅 localhost） | 否 |
+
+> **治理指标约定**：限流用 `gateway_ratelimit_{allowed,rejected,delayed}_total`；并发用
+> `gateway_concurrency_{acquired,rejected,wait_ms,wait_timeouts}_total` 及 `inflight/peak_inflight/limit_max`；
+> 熔断用 `gateway_circuit_{rejected,failures,successes}_total` 与按分桶的
+> `gateway_circuit_breaker_state{bucket}`（0/1/2 = Closed/Open/HalfOpen）；缓存用
+> `gateway_cache_{hits,misses,stored,bypassed}_total`；重试用
+> `gateway_retry_{requests,attempts,exhausted,failed}_total`。
 
 ### 4.3 共享状态与全量配置热重载
 
@@ -154,15 +161,16 @@ appsettings.json ──(编辑保存)──▶ JsonConfigProvider（Watcher ≤1
                      GatewayHotReload.ReloadCore()
                         ① ConfigValidator 校验闸门（失败→保留旧配置+lastError）
                         ② ConfigHelper.MapTo 原地映射 → 全部 Gateway Options 单例
-                        ③ 派生状态重建 → RateLimitState / IpFilterState.ApplyOptions()
+                        ③ 派生状态重建 → RateLimitState / IpFilterState / ConcurrencyLimitState / CircuitBreakerRegistry.ApplyOptions()
 
                      POST /admin/reload（仅 localhost）──▶ 同一套 ReloadCore（手动兜底）
 ```
 
 - **原地映射**：`ConfigHelper.MapTo` 把新配置写入已注入的 Options 单例（嵌套对象与数组均保持
   对象引用），所有治理中间件零改动即见新值——不再需要"只注入 state 不注入 options"。
-- **派生状态**：`RateLimitState`（每 IP 令牌桶）、`IpFilterState`（CIDR 列表）仍经
-  `ApplyOptions` 原地重建，下一次请求即用新规则；限流在途桶不中断。
+- **派生状态**：`RateLimitState`（每 IP 令牌桶）、`IpFilterState`（CIDR 列表）经
+  `ApplyOptions` 原地重建，下一次请求即用新规则；`ConcurrencyLimitState` 只换配置引用、
+  不清零在途槽位；`CircuitBreakerRegistry` 同步新配置但保留各分桶当前状态，指标曲线不会因重载断档。
 - **校验闸门**：应用前跑与 `--test-config` 相同的 `ConfigValidator`，非法配置被拦截、
   保留上一份有效配置并记 `lastError`，服务不中断（见 §6 容错）。
 - **双机制感知**：FileSystemWatcher 事件驱动（≤1s）+ 定时轮询兜底（~40s，覆盖原子替换/

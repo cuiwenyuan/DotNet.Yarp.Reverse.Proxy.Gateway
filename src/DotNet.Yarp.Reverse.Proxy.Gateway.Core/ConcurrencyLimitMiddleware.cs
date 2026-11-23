@@ -98,11 +98,13 @@ public class ConcurrencyLimitMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ConcurrencyLimitState _state;
+    private readonly GatewayMetrics? _metrics;
 
-    public ConcurrencyLimitMiddleware(RequestDelegate next, ConcurrencyLimitState state)
+    public ConcurrencyLimitMiddleware(RequestDelegate next, ConcurrencyLimitState state, GatewayMetrics? metrics = null)
     {
         _next = next;
         _state = state;
+        _metrics = metrics;
     }
 
     public async Task Invoke(HttpContext context)
@@ -114,11 +116,12 @@ public class ConcurrencyLimitMiddleware
             return;
         }
 
+        var waitStartedAt = Environment.TickCount64;
         var acquired = _state.TryAcquire();
         if (!acquired && options.WaitEnabled)
         {
             // 平滑模式：轮询等空位，最多 MaxWaitMs。用 10ms 粒度避免忙等。
-            var deadline = Environment.TickCount64 + Math.Max(0, options.MaxWaitMs);
+            var deadline = waitStartedAt + Math.Max(0, options.MaxWaitMs);
             while (!acquired && Environment.TickCount64 < deadline)
             {
                 await Task.Delay(Math.Min(10, Math.Max(1, (int)(deadline - Environment.TickCount64))));
@@ -126,9 +129,14 @@ public class ConcurrencyLimitMiddleware
             }
         }
 
+        var waitedMs = Environment.TickCount64 - waitStartedAt;
+        if (waitedMs > 0) _metrics?.RecordConcurrencyWait(waitedMs);
+
         if (!acquired)
         {
             _state.RecordReject();
+            _metrics?.RecordConcurrencyRejected();
+            if (options.WaitEnabled) _metrics?.RecordConcurrencyWaitTimeout();
             GatewayLogger.Warn($"并发上限触发：inFlight={_state.InFlight}/{options.MaxConcurrent} -> {context.Request.Path}");
             context.Response.StatusCode = options.StatusCode;
             context.Response.Headers.RetryAfter = "1";
@@ -137,6 +145,7 @@ public class ConcurrencyLimitMiddleware
             return;
         }
 
+        _metrics?.RecordConcurrencyAcquired();
         try
         {
             await _next(context);

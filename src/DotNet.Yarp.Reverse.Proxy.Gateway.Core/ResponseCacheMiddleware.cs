@@ -17,6 +17,7 @@ public class ResponseCacheMiddleware
     private readonly RequestDelegate _next;
     private readonly CacheOptions _options;
     private readonly SimpleMemoryCache _cache;
+    private readonly GatewayMetrics? _metrics;
     private readonly ConcurrentDictionary<string, CacheMeta> _meta = new();
 
     private readonly struct CacheMeta
@@ -33,17 +34,23 @@ public class ResponseCacheMiddleware
         public string CacheControl { get; }
     }
 
-    public ResponseCacheMiddleware(RequestDelegate next, CacheOptions options, SimpleMemoryCache cache)
+    public ResponseCacheMiddleware(
+        RequestDelegate next,
+        CacheOptions options,
+        SimpleMemoryCache cache,
+        GatewayMetrics? metrics = null)
     {
         _next = next;
         _options = options;
         _cache = cache;
+        _metrics = metrics;
     }
 
     public async Task Invoke(HttpContext context)
     {
         if (!_options.Enabled || !IsCacheableRequest(context))
         {
+            _metrics?.RecordCacheBypass();
             await _next(context);
             return;
         }
@@ -53,6 +60,7 @@ public class ResponseCacheMiddleware
         // 命中缓存：直接回包
         if (_cache.TryGet(key, out var cached) && _meta.TryGetValue(key, out var meta))
         {
+            _metrics?.RecordCacheHit();
             context.Response.StatusCode = meta.StatusCode;
             context.Response.ContentType = meta.ContentType;
             if (!string.IsNullOrEmpty(meta.CacheControl))
@@ -63,6 +71,7 @@ public class ResponseCacheMiddleware
             return;
         }
 
+        _metrics?.RecordCacheMiss();
         var originalBody = context.Response.Body;
         using var buffer = new MemoryStream();
         context.Response.Body = buffer;
@@ -81,6 +90,7 @@ public class ResponseCacheMiddleware
                         context.Response.Headers.CacheControl.ToString());
                     _meta[key] = newMeta;
                     _cache.Set(key, buffer.ToArray(), ttl);
+                    _metrics?.RecordCacheStore();
                 }
             }
         }

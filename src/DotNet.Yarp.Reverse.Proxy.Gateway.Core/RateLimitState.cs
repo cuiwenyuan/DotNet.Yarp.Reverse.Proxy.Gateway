@@ -111,11 +111,13 @@ public class RateLimitMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly RateLimitState _state;
+    private readonly GatewayMetrics? _metrics;
 
-    public RateLimitMiddleware(RequestDelegate next, RateLimitState state)
+    public RateLimitMiddleware(RequestDelegate next, RateLimitState state, GatewayMetrics? metrics = null)
     {
         _next = next;
         _state = state;
+        _metrics = metrics;
     }
 
     public async Task Invoke(HttpContext context)
@@ -125,6 +127,7 @@ public class RateLimitMiddleware
 
         // delay 平滑模式：最多重试等待 MaxDelayMs
         var deadline = Environment.TickCount64 + Math.Max(0, options.MaxDelayMs);
+        var delayed = false;
         SimpleRateLimiter.RateLimitInfo info;
         while (true)
         {
@@ -134,6 +137,7 @@ public class RateLimitMiddleware
             var delayMs = options.DelayEnabled ? info.WaitMs : int.MaxValue;
             if (delayMs > 0 && Environment.TickCount64 + delayMs <= deadline)
             {
+                delayed = true;
                 await Task.Delay(delayMs);
                 continue;
             }
@@ -144,6 +148,7 @@ public class RateLimitMiddleware
 
         if (!info.Allowed)
         {
+            _metrics?.RecordRateLimitRejected();
             GatewayLogger.Warn($"限流触发：{context.Connection.RemoteIpAddress} -> {context.Request.Path}");
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             context.Response.Headers.RetryAfter = info.ResetSeconds > 0 ? info.ResetSeconds.ToString() : "60";
@@ -151,6 +156,8 @@ public class RateLimitMiddleware
             return;
         }
 
+        if (delayed) _metrics?.RecordRateLimitDelayed();
+        _metrics?.RecordRateLimitAllowed();
         await _next(context);
     }
 

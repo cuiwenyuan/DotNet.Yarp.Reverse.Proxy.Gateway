@@ -16,7 +16,7 @@ public enum CircuitBreakerState
 /// </summary>
 public sealed class CircuitBreaker
 {
-    private readonly CircuitBreakerOptions _options;
+    private CircuitBreakerOptions _options;
     private readonly object _gate = new();
     private CircuitBreakerState _state = CircuitBreakerState.Closed;
     private int _failureCount;
@@ -24,6 +24,9 @@ public sealed class CircuitBreaker
     private int _halfOpenInFlight;
 
     public CircuitBreaker(CircuitBreakerOptions options) => _options = options;
+
+    /// <summary>热重载：替换配置引用（不重置当前状态与在途探测计数）。</summary>
+    public void ApplyOptions(CircuitBreakerOptions options) => Volatile.Write(ref _options, options);
 
     public CircuitBreakerState State
     {

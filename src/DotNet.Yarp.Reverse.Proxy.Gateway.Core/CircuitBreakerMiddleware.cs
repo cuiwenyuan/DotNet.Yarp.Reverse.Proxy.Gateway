@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Http;
 
 namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
@@ -14,12 +13,19 @@ public class CircuitBreakerMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly CircuitBreakerOptions _options;
-    private readonly ConcurrentDictionary<string, CircuitBreaker> _breakers = new();
+    private readonly CircuitBreakerRegistry _registry;
+    private readonly GatewayMetrics? _metrics;
 
-    public CircuitBreakerMiddleware(RequestDelegate next, CircuitBreakerOptions options)
+    public CircuitBreakerMiddleware(
+        RequestDelegate next,
+        CircuitBreakerOptions options,
+        CircuitBreakerRegistry registry,
+        GatewayMetrics? metrics = null)
     {
         _next = next;
         _options = options;
+        _registry = registry;
+        _metrics = metrics;
     }
 
     public async Task Invoke(HttpContext context)
@@ -31,10 +37,11 @@ public class CircuitBreakerMiddleware
         }
 
         var key = GetBucketKey(context);
-        var breaker = _breakers.GetOrAdd(key, _ => new CircuitBreaker(_options));
+        var breaker = _registry.GetOrAdd(key);
 
         if (!breaker.AllowRequest())
         {
+            _metrics?.RecordCircuitRejected();
             GatewayLogger.Warn(
                 $"熔断触发（{breaker.State}）：{context.Connection.RemoteIpAddress} -> {context.Request.Path}");
             context.Response.StatusCode = _options.StatusCode;
@@ -47,13 +54,20 @@ public class CircuitBreakerMiddleware
         {
             await _next(context);
             if (Array.IndexOf(_options.FailureStatusCodes, context.Response.StatusCode) >= 0)
+            {
                 breaker.RecordFailure();
+                _metrics?.RecordCircuitFailure();
+            }
             else
+            {
                 breaker.RecordSuccess();
+                _metrics?.RecordCircuitSuccess();
+            }
         }
         catch
         {
             breaker.RecordFailure();
+            _metrics?.RecordCircuitFailure();
             throw;
         }
     }

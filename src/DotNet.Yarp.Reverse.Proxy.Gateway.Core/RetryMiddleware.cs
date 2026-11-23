@@ -14,11 +14,13 @@ public class RetryMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly RetryOptions _options;
+    private readonly GatewayMetrics? _metrics;
 
-    public RetryMiddleware(RequestDelegate next, RetryOptions options)
+    public RetryMiddleware(RequestDelegate next, RetryOptions options, GatewayMetrics? metrics = null)
     {
         _next = next;
         _options = options;
+        _metrics = metrics;
     }
 
     public async Task Invoke(HttpContext context)
@@ -31,11 +33,13 @@ public class RetryMiddleware
             return;
         }
 
+        _metrics?.RecordRetryRequest();
         var originalBody = context.Response.Body;
         using var buffer = new MemoryStream();
         context.Response.Body = buffer;
 
         var attempt = 0;
+        var retryExhausted = false;
         Exception? lastError = null;
         try
         {
@@ -59,7 +63,14 @@ public class RetryMiddleware
                 if (shouldRetry && attempt < _options.MaxRetries && TryResetResponse(context))
                 {
                     attempt++;
+                    _metrics?.RecordRetryAttempt(attempt);
                     continue;
+                }
+
+                // 命中可重试条件但预算耗尽（响应已开始发送的场景不算耗尽）。
+                if (shouldRetry && attempt >= _options.MaxRetries)
+                {
+                    retryExhausted = true;
                 }
                 break;
             }
@@ -74,9 +85,12 @@ public class RetryMiddleware
             }
         }
 
+        if (retryExhausted) _metrics?.RecordRetryExhausted();
+
         // 最终尝试仍抛异常（且不可重试/重试耗尽）时，向上层透传，交由外层日志中间件处理。
         if (lastError is not null)
         {
+            _metrics?.RecordRetryFailure();
             throw lastError;
         }
     }

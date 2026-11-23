@@ -88,13 +88,13 @@ A request passes through the following stages from entry to response:
 ```
 ① Entry → IIS/ANCM → Kestrel
 ② UseForwardedHeaders: restore X-Forwarded-For/Proto/Host (real client IP & scheme)
-③ MetricsMiddleware: count/time every request (/metrics, /health short-circuit)
+③ MetricsMiddleware: count/time every request (/metrics, /health short-circuit; also aggregates rate-limit / concurrency / circuit / cache / retry counters)
 ④ ResponseCompression: gzip (logging inside sees original bytes)
 ⑤ ProxyLogging: log request/response details (optional JSON, fine-grained BodyLogRules)
 ⑥ RetryMiddleware: idempotent requests re-run the downstream pipeline on failure
 ⑦ Governance group (UseGatewayGovernance, outer → inner):
    AspxBlocker(ext blacklist) → SecurityHeaders → IpFilter(IP allow/deny)
-   → RequestSize(body limit) → CORS → RateLimit → CircuitBreaker
+   → RequestSize(body limit) → CORS → RateLimit → ConcurrencyLimit → CircuitBreaker
    → ApiKeyAuth → JwtAuth → ResponseCache → LocationRewrite
 ⑧ FileServer: wwwroot static files
 ⑨ YARP: route match → load balance (RoundRobin/Weighted/...) → forward to backend
@@ -150,8 +150,16 @@ A request passes through the following stages from entry to response:
 | `LocationRewriteMiddleware` | —— | Rewrites `Location` on 3xx (request-host substitution or explicit rules) | No |
 | `RetryMiddleware` | —— | Idempotent methods + 502/504/conn error re-run downstream (max 1 retry, storm-guard) | No |
 | `ProxyLoggingMiddleware` | —— | Method/URL/IP/latency/status/request body/response body; JSON output; fine-grained BodyLogRules | No |
-| `MetricsMiddleware` | —— | `/metrics` Prometheus text + `/health` probe (Interlocked counters) | No |
-| `AdminStatusMiddleware` | —— | `/admin/status` JSON summary + `POST /admin/reload` (localhost only) | No |
+| `MetricsMiddleware` | —— | `/metrics` Prometheus text + `/health` probe; baseline request counters plus rate-limit / concurrency / circuit / cache / retry governance counters (Interlocked) | No |
+| `AdminStatusMiddleware` | —— | `/admin/status` JSON summary (including `governance` node) + `POST /admin/reload` (localhost only) | No |
+
+> **Governance metric names**: rate limit uses `gateway_ratelimit_{allowed,rejected,delayed}_total`;
+> concurrency uses `gateway_concurrency_{acquired,rejected,wait_ms,wait_timeouts}_total` plus
+> `inflight/peak_inflight/limit_max`; circuit breaker uses
+> `gateway_circuit_{rejected,failures,successes}_total` and per-bucket
+> `gateway_circuit_breaker_state{bucket}` (0/1/2 = Closed/Open/HalfOpen); cache uses
+> `gateway_cache_{hits,misses,stored,bypassed}_total`; retry uses
+> `gateway_retry_{requests,attempts,exhausted,failed}_total`.
 
 ### 4.3 Shared state & full configuration hot reload
 
@@ -166,7 +174,7 @@ appsettings.json ──(edit/save)──▶ JsonConfigProvider (Watcher ≤1s / 
                      GatewayHotReload.ReloadCore()
                         ① ConfigValidator gate (fail → keep old config + lastError)
                         ② ConfigHelper.MapTo in-place → all Gateway Options singletons
-                        ③ Derived-state rebuild → RateLimitState / IpFilterState.ApplyOptions()
+                        ③ Derived-state rebuild → RateLimitState / IpFilterState / ConcurrencyLimitState / CircuitBreakerRegistry.ApplyOptions()
 
                      POST /admin/reload (localhost only) ──▶ same ReloadCore (manual fallback)
 ```
@@ -175,8 +183,10 @@ appsettings.json ──(edit/save)──▶ JsonConfigProvider (Watcher ≤1s / 
   singletons (nested objects and arrays keep their references), so every governance middleware sees
   new values with zero code changes — no longer limited to "state-only injection".
 - **Derived state**: `RateLimitState` (per-IP token buckets) and `IpFilterState` (CIDR list) are
-  still rebuilt in place via `ApplyOptions`; the next request uses the new rules, in-flight buckets
-  are not interrupted.
+  rebuilt in place via `ApplyOptions`; the next request uses the new rules, in-flight buckets are
+  not interrupted. `ConcurrencyLimitState` only swaps the config reference and never resets in-flight
+  slots; `CircuitBreakerRegistry` receives the new config while preserving each bucket's current state,
+  so metric curves do not break on reload.
 - **Validation gate**: the same `ConfigValidator` as `--test-config` runs before applying; invalid
   config is rejected, the last valid config is kept, `lastError` recorded, and the service stays up
   (see §6 resilience).

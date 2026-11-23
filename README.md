@@ -87,7 +87,7 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 | gzip 压缩 | 框架内置 ResponseCompression（HTTP 与 HTTPS 均生效） | `gzip` |
 | 响应缓存 | 内存缓存 GET/HEAD 200 响应（TTL 可配） | `proxy_cache` |
 | 安全响应头 | X-Frame-Options / nosniff / CSP / Referrer-Policy 等 | SecurityHeaders 插件 |
-| 监控指标 | `/metrics`（Prometheus 文本）+ `/health` 存活探针 | `stub_status` |
+| 监控指标 | `/metrics`（Prometheus 文本：请求量/耗时/状态码 + 限流/并发/熔断/缓存/重试治理指标）+ `/health` 存活探针 | `stub_status` |
 | 管理状态端点 | `/admin/status`（JSON 摘要）+ `POST /admin/reload`（localhost 热重载治理配置） | nginx plus API |
 | 配置预检 | `--test-config` 启动前校验配置（唯一性/地址合法性/transforms 由 YARP 自身校验），失败返回非零退出码 | `nginx -t` |
 | 请求链路 ID | 生成/透传 `X-Request-ID`，贯穿 proxy log、access log 与 XTrace，响应头回写 | `$request_id` / `X-Request-ID` |
@@ -436,6 +436,21 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | `ConcurrencyLimit:MaxWaitMs` | `1000` | 排队模式最长等待毫秒数，超时返回 `StatusCode` |
 | `ConcurrencyLimit:StatusCode` | `503` | 并发超限时的 HTTP 状态码（对齐 nginx `limit_conn` 默认行为），并回写 `Retry-After: 1` 与 `X-Concurrency-Limit` 头 |
 
+#### 治理指标（`/metrics`）
+
+除基础流量指标外，`/metrics` 以 Prometheus 文本格式暴露以下治理指标（零第三方 NuGet，纯 `Interlocked` 原子计数）：
+
+| 指标族 | 关键指标 | 含义 |
+| --- | --- | --- |
+| 限流 | `gateway_ratelimit_allowed_total` / `gateway_ratelimit_rejected_total` / `gateway_ratelimit_delayed_total` | 令牌桶放行、返回 429、平滑延迟后放行次数（对应 `limit_req`） |
+| 并发上限 | `gateway_concurrency_acquired_total` / `gateway_concurrency_rejected_total` / `gateway_concurrency_wait_ms_total` / `gateway_concurrency_wait_timeouts_total` / `gateway_concurrency_inflight` / `gateway_concurrency_peak_inflight` / `gateway_concurrency_limit_max` | 占用槽位、拒绝、排队等待、超时以及当前/峰值/上限（对应 `limit_conn`） |
+| 熔断 | `gateway_circuit_rejected_total` / `gateway_circuit_failures_total` / `gateway_circuit_successes_total` / `gateway_circuit_breaker_state{bucket="..."}` | 快速失败、下游成败计数；分桶状态 `0=Closed / 1=Open / 2=HalfOpen` |
+| 缓存 | `gateway_cache_hits_total` / `gateway_cache_misses_total` / `gateway_cache_stored_total` / `gateway_cache_bypassed_total` | 命中、未命中、写入、策略绕过次数（对应 `proxy_cache`） |
+| 重试 | `gateway_retry_requests_total` / `gateway_retry_attempts_total` / `gateway_retry_exhausted_total` / `gateway_retry_failed_total` | 有资格重试的请求、额外尝试次数、预算耗尽、最终失败 |
+| 路径分布 | `gateway_requests_by_path{path="..."}` | 仅在 `Metrics:IncludePathLabels=true` 时输出，按路径首段聚合，注意基数 |
+
+`/admin/status` 同步增加 `governance` 节点（限流/并发/熔断/缓存/重试计数与各熔断分桶状态），便于不接 Prometheus 时快速排障。
+
 ### 8.3 配置热重载（等价 nginx -s reload）
 
 修改 `appsettings.json` 并保存后，**全部 `Gateway` 治理配置自动生效，无需重启、无需手动 reload**。基于已引用的 NewLife.Core 实现，不引入任何新依赖。
@@ -444,7 +459,7 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | --- | --- |
 | 变更感知 | `JsonConfigProvider`（FileSystemWatcher 事件驱动，≤1s）+ 定时轮询兜底（~40s，覆盖原子替换 / 网络盘 / watcher 失效） |
 | 原地映射 | `ConfigHelper.MapTo` 把新配置原地写入已注入的 Options 单例（含嵌套对象与数组），持有引用的中间件零改动即见新值 |
-| 派生状态重建 | 限流令牌桶、IP 黑白名单 CIDR 规则集经 `Changed` 回调调 `ApplyOptions` 重建；并发上限只换配置引用、**不清零在途计数**（避免重载瞬间放宽配额） |
+| 派生状态重建 | 限流令牌桶、IP 黑白名单 CIDR 规则集经 `Changed` 回调调 `ApplyOptions` 重建；并发上限只换配置引用、**不清零在途计数**（避免重载瞬间放宽配额）；熔断注册表同步新配置但保留当前状态 |
 | 校验闸门 | 应用前先跑与 `--test-config` 相同的 `ConfigValidator`（含 YARP 路由 transforms 校验）；非法配置被拦截、保留上一份有效配置、记录 `lastError`，服务不中断 |
 
 - **路由/集群**（`ReverseProxy`）仍由 YARP 的 `IConfiguration` reloadOnChange 热加载，行为不变。

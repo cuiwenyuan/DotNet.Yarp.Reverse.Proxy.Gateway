@@ -12,7 +12,7 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 ///   （FileSystemWatcher 事件驱动 + 定时轮询兜底，≤1s 感知变更）；
 /// - 订阅 IConfigProvider.Changed，变更时先跑校验闸门（注入的校验委托，等价 nginx -t），
 ///   校验通过才用 ConfigHelper.MapTo 把新配置"原地映射"到真实单例对象（持有引用的中间件零改动），
-///   并重建有派生状态的两个 state；校验失败则保留旧配置、记录告警，服务不中断。
+///   并重建有派生状态的 state（限流/IP/并发/熔断）；校验失败则保留旧配置、记录告警，服务不中断。
 ///
 /// 硬约束：仅使用 NewLife.Core + BCL，不引入任何新 NuGet。
 /// </summary>
@@ -24,6 +24,7 @@ public sealed class GatewayHotReload : IDisposable
     private readonly RateLimitState _rateLimitState;
     private readonly IpFilterState _ipFilterState;
     private readonly ConcurrencyLimitState _concurrencyState;
+    private readonly CircuitBreakerRegistry _circuitRegistry;
     private readonly Func<string, (bool ok, string? error)> _validate;
     private readonly string _configPath;
     private readonly object _sentinel;                    // 仅用于触发 watcher，值不用
@@ -51,6 +52,7 @@ public sealed class GatewayHotReload : IDisposable
         RateLimitState rateLimitState,
         IpFilterState ipFilterState,
         ConcurrencyLimitState concurrencyState,
+        CircuitBreakerRegistry circuitRegistry,
         Func<string, (bool ok, string? error)> validate)
     {
         _configPath = configPath;
@@ -58,6 +60,7 @@ public sealed class GatewayHotReload : IDisposable
         _rateLimitState = rateLimitState;
         _ipFilterState = ipFilterState;
         _concurrencyState = concurrencyState;
+        _circuitRegistry = circuitRegistry;
         _validate = validate;
 
         _provider = JsonConfigProvider.LoadAppSettings(configPath);
@@ -130,6 +133,7 @@ public sealed class GatewayHotReload : IDisposable
                 _rateLimitState.ApplyOptions(_shared.RateLimit);
                 _ipFilterState.ApplyOptions(_shared.IpFilter);
                 _concurrencyState.ApplyOptions(_shared.ConcurrencyLimit);
+                _circuitRegistry.ApplyOptions(_shared.CircuitBreaker);
 
                 Interlocked.Increment(ref _reloadCount);
                 _lastReloadAtUtc = DateTime.UtcNow;
@@ -138,7 +142,8 @@ public sealed class GatewayHotReload : IDisposable
                 GatewayLogger.Info($"治理配置已热重载（{(fromFileWatch ? "文件变更" : "手动")}）：" +
                                    $"RateLimit(PerMinute={_shared.RateLimit.PerMinute},PerIp={_shared.RateLimit.PerIp}) " +
                                    $"IpFilter(Enabled={_shared.IpFilter.Enabled}) " +
-                                   $"ConcurrencyLimit(Enabled={_shared.ConcurrencyLimit.Enabled},Max={_shared.ConcurrencyLimit.MaxConcurrent})");
+                                   $"ConcurrencyLimit(Enabled={_shared.ConcurrencyLimit.Enabled},Max={_shared.ConcurrencyLimit.MaxConcurrent}) " +
+                                   $"CircuitBreaker(Enabled={_shared.CircuitBreaker.Enabled})");
                 return true;
             }
             catch (Exception ex)

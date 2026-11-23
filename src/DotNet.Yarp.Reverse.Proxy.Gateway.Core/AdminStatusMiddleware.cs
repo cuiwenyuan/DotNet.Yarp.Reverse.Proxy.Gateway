@@ -24,6 +24,7 @@ public class AdminStatusMiddleware
     private readonly GatewayConfigReloader? _reloader;
     private readonly GatewayHotReload? _hotReload;
     private readonly ConcurrencyLimitState? _concurrencyState;
+    private readonly CircuitBreakerRegistry? _circuitRegistry;
 
     public AdminStatusMiddleware(
         RequestDelegate next,
@@ -31,7 +32,8 @@ public class AdminStatusMiddleware
         GatewayMetrics metrics,
         GatewayConfigReloader? reloader = null,
         GatewayHotReload? hotReload = null,
-        ConcurrencyLimitState? concurrencyState = null)
+        ConcurrencyLimitState? concurrencyState = null,
+        CircuitBreakerRegistry? circuitRegistry = null)
     {
         _next = next;
         _options = options;
@@ -39,6 +41,7 @@ public class AdminStatusMiddleware
         _reloader = reloader;
         _hotReload = hotReload;
         _concurrencyState = concurrencyState;
+        _circuitRegistry = circuitRegistry;
     }
 
     public async Task Invoke(HttpContext context)
@@ -71,6 +74,7 @@ public class AdminStatusMiddleware
     private async Task HandleStatusAsync(HttpContext context)
     {
         var snapshot = _metrics.GetSnapshot();
+        var governance = _metrics.GetGovernanceSnapshot();
         var payload = new
         {
             app = "DotNet.Yarp.Reverse.Proxy.Gateway",
@@ -103,6 +107,43 @@ public class AdminStatusMiddleware
                 inFlight = _concurrencyState.InFlight,
                 peakInFlight = _concurrencyState.PeakInFlight,
                 rejected = _concurrencyState.Rejected
+            },
+            governance = new
+            {
+                rateLimit = new
+                {
+                    allowed = governance.RateLimitAllowed,
+                    rejected = governance.RateLimitRejected,
+                    delayed = governance.RateLimitDelayed
+                },
+                concurrency = new
+                {
+                    acquired = governance.ConcurrencyAcquired,
+                    rejected = governance.ConcurrencyRejected,
+                    waitMs = governance.ConcurrencyWaitMsTotal,
+                    waitTimeouts = governance.ConcurrencyWaitTimeouts
+                },
+                circuitBreaker = new
+                {
+                    rejected = governance.CircuitRejected,
+                    failures = governance.CircuitFailures,
+                    successes = governance.CircuitSuccesses,
+                    states = _circuitRegistry?.Snapshot()
+                },
+                cache = new
+                {
+                    hits = governance.CacheHits,
+                    misses = governance.CacheMisses,
+                    stored = governance.CacheStores,
+                    bypassed = governance.CacheBypassed
+                },
+                retry = new
+                {
+                    requests = governance.RetryRequests,
+                    attempts = governance.RetryAttempts,
+                    exhausted = governance.RetryExhausted,
+                    failures = governance.RetryFailures
+                }
             }
         };
 

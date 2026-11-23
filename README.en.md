@@ -93,7 +93,7 @@ and hard to fold into one unified operations system.
 | gzip compression | Built-in ResponseCompression (HTTP & HTTPS) | `gzip` |
 | Response cache | In-memory cache of GET/HEAD 200 responses (configurable TTL) | `proxy_cache` |
 | Security headers | X-Frame-Options / nosniff / CSP / Referrer-Policy etc. | SecurityHeaders plugin |
-| Metrics endpoint | `/metrics` (Prometheus text) + `/health` liveness probe | `stub_status` |
+| Metrics endpoint | `/metrics` (Prometheus text: traffic/latency/status + rate-limit/concurrency/circuit/cache/retry governance metrics) + `/health` liveness probe | `stub_status` |
 | Admin endpoints | `/admin/status` (JSON summary) + `POST /admin/reload` (localhost hot reload of governance config) | nginx plus API |
 | Config precheck | `--test-config` validates config before startup (uniqueness / address validity / transforms via YARP's own validator), exits non-zero on failure | `nginx -t` |
 | Request correlation ID | Generate / pass through `X-Request-ID` across proxy logs, access logs and XTrace, echoed in response | `$request_id` / `X-Request-ID` |
@@ -458,6 +458,23 @@ Example:
 | `ConcurrencyLimit:MaxWaitMs` | `1000` | Max queue wait in ms; on timeout returns `StatusCode` |
 | `ConcurrencyLimit:StatusCode` | `503` | HTTP status on concurrency overflow (matches nginx `limit_conn` default), also writes `Retry-After: 1` and `X-Concurrency-Limit` headers |
 
+#### Governance metrics (`/metrics`)
+
+In addition to baseline traffic metrics, `/metrics` exposes the following governance metrics in
+Prometheus text format (pure BCL `Interlocked` counters, no third-party NuGet):
+
+| Family | Key metrics | Meaning |
+| --- | --- | --- |
+| Rate limit | `gateway_ratelimit_allowed_total` / `gateway_ratelimit_rejected_total` / `gateway_ratelimit_delayed_total` | Requests passed, rejected with 429, and released after smooth delay (like `limit_req`) |
+| Concurrency | `gateway_concurrency_acquired_total` / `gateway_concurrency_rejected_total` / `gateway_concurrency_wait_ms_total` / `gateway_concurrency_wait_timeouts_total` / `gateway_concurrency_inflight` / `gateway_concurrency_peak_inflight` / `gateway_concurrency_limit_max` | Slots acquired, rejections, queue wait, timeouts, current/peak/configured ceiling (like `limit_conn`) |
+| Circuit breaker | `gateway_circuit_rejected_total` / `gateway_circuit_failures_total` / `gateway_circuit_successes_total` / `gateway_circuit_breaker_state{bucket="..."}` | Fast failures, downstream failures/successes, and per-bucket state `0=Closed / 1=Open / 2=HalfOpen` |
+| Cache | `gateway_cache_hits_total` / `gateway_cache_misses_total` / `gateway_cache_stored_total` / `gateway_cache_bypassed_total` | Hits, misses, writes, policy bypasses (like `proxy_cache`) |
+| Retry | `gateway_retry_requests_total` / `gateway_retry_attempts_total` / `gateway_retry_exhausted_total` / `gateway_retry_failed_total` | Retry-eligible requests, extra attempts, exhausted budgets, final failures |
+| Path distribution | `gateway_requests_by_path{path="..."}` | Emitted only when `Metrics:IncludePathLabels=true`; grouped by first path segment (watch cardinality) |
+
+`/admin/status` also includes a `governance` node with the same counters and per-bucket breaker
+states, so you can troubleshoot quickly without a Prometheus stack.
+
 ### 8.3 Configuration hot reload (equivalent to nginx -s reload)
 
 Edit and save `appsettings.json` and **all `Gateway` governance settings take effect automatically — no restart, no manual reload**. Built on the already-referenced NewLife.Core; no new dependencies.
@@ -466,7 +483,7 @@ Edit and save `appsettings.json` and **all `Gateway` governance settings take ef
 | --- | --- |
 | Change detection | `JsonConfigProvider` (FileSystemWatcher events, ≤1s) + periodic polling fallback (~40s, covers atomic replacement / network drives / watcher failure) |
 | In-place mapping | `ConfigHelper.MapTo` writes new values into the already-injected Options singletons (including nested objects and arrays); middleware holding the references sees new values with zero code changes |
-| Derived-state rebuild | Rate-limit token bucket and IP CIDR rules are rebuilt via `ApplyOptions` in the `Changed` callback; the concurrency cap only swaps the config reference and **does not reset the in-flight counter** (avoids momentarily relaxing the cap during reload) |
+| Derived-state rebuild | Rate-limit token bucket and IP CIDR rules are rebuilt via `ApplyOptions` in the `Changed` callback; the concurrency cap only swaps the config reference and **does not reset the in-flight counter** (avoids momentarily relaxing the cap during reload); the circuit-breaker registry receives the new config while keeping current breaker states |
 | Validation gate | Before applying, the same `ConfigValidator` as `--test-config` runs (including YARP route transform validation); invalid config is rejected, the last valid config is kept, `lastError` is recorded, and the service stays up |
 
 - **Routes / clusters** (`ReverseProxy`) keep using YARP's `IConfiguration` reloadOnChange — behavior unchanged.
