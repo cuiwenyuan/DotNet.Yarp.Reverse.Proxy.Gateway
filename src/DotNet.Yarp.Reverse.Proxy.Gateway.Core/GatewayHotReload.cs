@@ -23,6 +23,7 @@ public sealed class GatewayHotReload : IDisposable
     private readonly GatewayOptions _shared;              // DI 中的真实单例（原地更新，引用不变）
     private readonly RateLimitState _rateLimitState;
     private readonly IpFilterState _ipFilterState;
+    private readonly ConcurrencyLimitState _concurrencyState;
     private readonly Func<string, (bool ok, string? error)> _validate;
     private readonly string _configPath;
     private readonly object _sentinel;                    // 仅用于触发 watcher，值不用
@@ -49,12 +50,14 @@ public sealed class GatewayHotReload : IDisposable
         GatewayOptions shared,
         RateLimitState rateLimitState,
         IpFilterState ipFilterState,
+        ConcurrencyLimitState concurrencyState,
         Func<string, (bool ok, string? error)> validate)
     {
         _configPath = configPath;
         _shared = shared;
         _rateLimitState = rateLimitState;
         _ipFilterState = ipFilterState;
+        _concurrencyState = concurrencyState;
         _validate = validate;
 
         _provider = JsonConfigProvider.LoadAppSettings(configPath);
@@ -123,9 +126,10 @@ public sealed class GatewayHotReload : IDisposable
                 }
                 section.MapTo(_shared, _provider);
 
-                // 3) 重建有派生状态的两个组件
+                // 3) 重建有派生状态的组件（并发上限只换配置引用，不清零在途计数）
                 _rateLimitState.ApplyOptions(_shared.RateLimit);
                 _ipFilterState.ApplyOptions(_shared.IpFilter);
+                _concurrencyState.ApplyOptions(_shared.ConcurrencyLimit);
 
                 Interlocked.Increment(ref _reloadCount);
                 _lastReloadAtUtc = DateTime.UtcNow;
@@ -133,7 +137,8 @@ public sealed class GatewayHotReload : IDisposable
                 error = null;
                 GatewayLogger.Info($"治理配置已热重载（{(fromFileWatch ? "文件变更" : "手动")}）：" +
                                    $"RateLimit(PerMinute={_shared.RateLimit.PerMinute},PerIp={_shared.RateLimit.PerIp}) " +
-                                   $"IpFilter(Enabled={_shared.IpFilter.Enabled})");
+                                   $"IpFilter(Enabled={_shared.IpFilter.Enabled}) " +
+                                   $"ConcurrencyLimit(Enabled={_shared.ConcurrencyLimit.Enabled},Max={_shared.ConcurrencyLimit.MaxConcurrent})");
                 return true;
             }
             catch (Exception ex)

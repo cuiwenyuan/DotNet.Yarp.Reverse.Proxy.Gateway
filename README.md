@@ -74,6 +74,7 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 | 负载均衡 | RoundRobin / PowerOfTwo / 等策略 | `upstream` + 算法 |
 | 主动 / 被动健康检查 | 周期探测后端 `/health` | `health_check` |
 | 限流 | 自研令牌桶（rate/burst/delay 可配），输出 X-Rate-Limit-* 头 | `limit_req` |
+| 全局并发上限 | 限制同时在途请求数（可排队），后端承压的最后一道保险 | `limit_conn` |
 | 跨域 CORS | 来源 / 方法 / 头白名单 | `add_header 'Access-Control-Allow-*'` |
 | 简易 API Key 认证 | 校验 `X-Api-Key` 头 | `auth_request` 轻量版 |
 | 入口安全拦截 | 扩展名黑名单（.aspx/.php/.jsp…）直接 403 | `location ~* \.(aspx\|php)$ { return 403 }` |
@@ -230,6 +231,7 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 │   │   ├── GatewayExtensions.cs          # 注册与管线挂载（AddGateway / UseGatewayGovernance）
 │   │   ├── SimpleRateLimiter.cs          # 自研令牌桶（rate/burst/delay，余量查询）
 │   │   ├── RateLimitState.cs             # 限流共享状态 + 中间件（X-Rate-Limit-* 头、429/延迟）
+│   │   ├── ConcurrencyLimitMiddleware.cs # 并发上限状态 + 中间件（Interlocked CAS，等价 limit_conn）
 │   │   ├── CorsMiddleware.cs             # 跨域中间件
 │   │   ├── ApiKeyAuthMiddleware.cs        # 简易 API Key 认证（失败返回 401）
 │   │   ├── AspxBlockerMiddleware.cs      # 扩展名黑名单拦截（命中返回 403）
@@ -288,6 +290,7 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
           → RequestSize（请求体大小限制）
           → CORS
           → 限流
+          → ConcurrencyLimit（全局并发上限，可排队）
           → CircuitBreaker（熔断/降级）
           → API Key 认证
           → JWT 认证（HS256/RS256）
@@ -427,6 +430,11 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | `CorrelationId:HeaderName` | `X-Request-ID` | 请求头 / 响应头名称 |
 | `CorrelationId:EchoResponseHeader` | `true` | 是否把 ID 回写响应头供客户端追踪 |
 | `CorrelationId:TrustIncoming` | `true` | 是否信任并透传客户端传入的合法 ID（非法 ID 一律重新生成） |
+| `ConcurrencyLimit:Enabled` | `false` | 是否启用全局并发上限（默认关，不影响既有部署） |
+| `ConcurrencyLimit:MaxConcurrent` | `100` | 允许的最大在途请求数（等价 nginx `limit_conn` 的 zone 并发上限） |
+| `ConcurrencyLimit:WaitEnabled` | `false` | 超额时是否排队等待空位（平滑模式）；默认立即拒绝 |
+| `ConcurrencyLimit:MaxWaitMs` | `1000` | 排队模式最长等待毫秒数，超时返回 `StatusCode` |
+| `ConcurrencyLimit:StatusCode` | `503` | 并发超限时的 HTTP 状态码（对齐 nginx `limit_conn` 默认行为），并回写 `Retry-After: 1` 与 `X-Concurrency-Limit` 头 |
 
 ### 8.3 配置热重载（等价 nginx -s reload）
 
@@ -436,7 +444,7 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | --- | --- |
 | 变更感知 | `JsonConfigProvider`（FileSystemWatcher 事件驱动，≤1s）+ 定时轮询兜底（~40s，覆盖原子替换 / 网络盘 / watcher 失效） |
 | 原地映射 | `ConfigHelper.MapTo` 把新配置原地写入已注入的 Options 单例（含嵌套对象与数组），持有引用的中间件零改动即见新值 |
-| 派生状态重建 | 限流令牌桶、IP 黑白名单 CIDR 规则集经 `Changed` 回调调 `ApplyOptions` 重建 |
+| 派生状态重建 | 限流令牌桶、IP 黑白名单 CIDR 规则集经 `Changed` 回调调 `ApplyOptions` 重建；并发上限只换配置引用、**不清零在途计数**（避免重载瞬间放宽配额） |
 | 校验闸门 | 应用前先跑与 `--test-config` 相同的 `ConfigValidator`（含 YARP 路由 transforms 校验）；非法配置被拦截、保留上一份有效配置、记录 `lastError`，服务不中断 |
 
 - **路由/集群**（`ReverseProxy`）仍由 YARP 的 `IConfiguration` reloadOnChange 热加载，行为不变。

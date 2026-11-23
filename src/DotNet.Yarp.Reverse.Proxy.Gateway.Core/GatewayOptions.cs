@@ -27,6 +27,34 @@ public class GatewayOptions
     public NginxAccessLogOptions NginxAccessLog { get; set; } = new();
     /// <summary>请求链路 ID（X-Request-ID），贯穿所有日志便于排障。</summary>
     public CorrelationIdOptions CorrelationId { get; set; } = new();
+    /// <summary>全局并发连接上限（等价 nginx limit_conn），保护后端不被并发打爆。</summary>
+    public ConcurrencyLimitOptions ConcurrencyLimit { get; set; } = new();
+}
+
+/// <summary>
+/// 全局并发上限配置（对应 nginx 的 limit_conn / limit_conn_zone）。
+/// 限制"同时在途"的请求数（不是速率），用于后端承压保护：后端慢时并发堆积会被闸门挡在入口。
+/// 纯 BCL 实现（Interlocked CAS 计数），零第三方 NuGet。
+/// </summary>
+public class ConcurrencyLimitOptions
+{
+    /// <summary>是否启用并发上限。默认关闭，避免改变既有部署行为。</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>允许的最大在途请求数。默认 100（近似 nginx limit_conn 的 zone 大小）。</summary>
+    public int MaxConcurrent { get; set; } = 100;
+
+    /// <summary>
+    /// 超额请求是否排队等待空位（平滑模式，类似 nginx limit_conn 的排队语义）。
+    /// 默认 false：超额立即拒绝；true 时最多等待 MaxWaitMs 毫秒，仍无空位才拒绝。
+    /// </summary>
+    public bool WaitEnabled { get; set; }
+
+    /// <summary>排队模式下最长等待毫秒数，默认 1000。超过则拒绝。</summary>
+    public int MaxWaitMs { get; set; } = 1000;
+
+    /// <summary>拒绝时返回的 HTTP 状态码，默认 503 Service Unavailable（对齐 nginx limit_conn 默认行为）。</summary>
+    public int StatusCode { get; set; } = StatusCodes.Status503ServiceUnavailable;
 }
 
 /// <summary>

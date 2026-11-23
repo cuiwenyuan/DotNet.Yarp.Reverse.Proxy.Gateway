@@ -23,19 +23,22 @@ public class AdminStatusMiddleware
     private readonly GatewayMetrics _metrics;
     private readonly GatewayConfigReloader? _reloader;
     private readonly GatewayHotReload? _hotReload;
+    private readonly ConcurrencyLimitState? _concurrencyState;
 
     public AdminStatusMiddleware(
         RequestDelegate next,
         AdminOptions options,
         GatewayMetrics metrics,
         GatewayConfigReloader? reloader = null,
-        GatewayHotReload? hotReload = null)
+        GatewayHotReload? hotReload = null,
+        ConcurrencyLimitState? concurrencyState = null)
     {
         _next = next;
         _options = options;
         _metrics = metrics;
         _reloader = reloader;
         _hotReload = hotReload;
+        _concurrencyState = concurrencyState;
     }
 
     public async Task Invoke(HttpContext context)
@@ -92,6 +95,14 @@ public class AdminStatusMiddleware
                 totalDurationMs = snapshot.TotalDurationMs,
                 maxDurationMs = snapshot.MaxDurationMs,
                 statusCodes = snapshot.StatusCodes
+            },
+            concurrency = _concurrencyState is null ? null : new
+            {
+                enabled = _concurrencyState.Options.Enabled,
+                maxConcurrent = _concurrencyState.Options.MaxConcurrent,
+                inFlight = _concurrencyState.InFlight,
+                peakInFlight = _concurrencyState.PeakInFlight,
+                rejected = _concurrencyState.Rejected
             }
         };
 

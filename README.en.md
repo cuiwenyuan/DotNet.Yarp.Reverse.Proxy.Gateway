@@ -80,6 +80,7 @@ and hard to fold into one unified operations system.
 | Load balancing | RoundRobin / PowerOfTwo / etc. | `upstream` + algorithm |
 | Active / passive health check | Periodic probe of backend `/health` | `health_check` |
 | Rate limiting | Self-built token bucket (rate/burst/delay configurable), X-Rate-Limit-* headers | `limit_req` |
+| Global concurrency cap | Limits concurrent in-flight requests (optional queueing), last line of defense for backend pressure | `limit_conn` |
 | CORS | Origin / method / header allowlist | `add_header 'Access-Control-Allow-*'` |
 | Simple API Key auth | Validates `X-Api-Key` header | lightweight `auth_request` |
 | Edge security block | Extension blacklist (.aspx/.php/.jsp…) → 403 | `location ~* \.(aspx\|php)$ { return 403 }` |
@@ -250,6 +251,7 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # Repo root (local work dir may be named Do
 │   │   ├── GatewayExtensions.cs          # Registration & pipeline (AddGateway / UseGatewayGovernance)
 │   │   ├── SimpleRateLimiter.cs          # Self-built token bucket (rate/burst/delay, remaining query)
 │   │   ├── RateLimitState.cs             # Rate-limit shared state + middleware (X-Rate-Limit-*, 429/delay)
+│   │   ├── ConcurrencyLimitMiddleware.cs # Concurrency cap state + middleware (Interlocked CAS, equiv limit_conn)
 │   │   ├── CorsMiddleware.cs             # CORS middleware
 │   │   ├── ApiKeyAuthMiddleware.cs        # Simple API Key auth (401 on failure)
 │   │   ├── AspxBlockerMiddleware.cs      # Extension blacklist block (403 on match)
@@ -308,6 +310,7 @@ Request → UseForwardedHeaders (restore X-Forwarded-*)
              → RequestSize (request body size limit)
              → CORS
              → Rate limit
+             → ConcurrencyLimit (global concurrency cap, optional queueing)
              → CircuitBreaker (circuit breaker / degradation)
              → API Key auth
              → JWT auth (HS256/RS256)
@@ -449,6 +452,11 @@ Example:
 | `CorrelationId:HeaderName` | `X-Request-ID` | Request / response header name |
 | `CorrelationId:EchoResponseHeader` | `true` | Echo the ID in the response header for client-side tracing |
 | `CorrelationId:TrustIncoming` | `true` | Trust and pass through a valid client-supplied ID (invalid IDs are always regenerated) |
+| `ConcurrencyLimit:Enabled` | `false` | Enable the global concurrency cap (off by default, no change to existing deployments) |
+| `ConcurrencyLimit:MaxConcurrent` | `100` | Max in-flight requests (equivalent to nginx `limit_conn` concurrency ceiling) |
+| `ConcurrencyLimit:WaitEnabled` | `false` | Queue excess requests for a free slot (smooth mode); default rejects immediately |
+| `ConcurrencyLimit:MaxWaitMs` | `1000` | Max queue wait in ms; on timeout returns `StatusCode` |
+| `ConcurrencyLimit:StatusCode` | `503` | HTTP status on concurrency overflow (matches nginx `limit_conn` default), also writes `Retry-After: 1` and `X-Concurrency-Limit` headers |
 
 ### 8.3 Configuration hot reload (equivalent to nginx -s reload)
 
@@ -458,7 +466,7 @@ Edit and save `appsettings.json` and **all `Gateway` governance settings take ef
 | --- | --- |
 | Change detection | `JsonConfigProvider` (FileSystemWatcher events, ≤1s) + periodic polling fallback (~40s, covers atomic replacement / network drives / watcher failure) |
 | In-place mapping | `ConfigHelper.MapTo` writes new values into the already-injected Options singletons (including nested objects and arrays); middleware holding the references sees new values with zero code changes |
-| Derived-state rebuild | Rate-limit token bucket and IP CIDR rules are rebuilt via `ApplyOptions` in the `Changed` callback |
+| Derived-state rebuild | Rate-limit token bucket and IP CIDR rules are rebuilt via `ApplyOptions` in the `Changed` callback; the concurrency cap only swaps the config reference and **does not reset the in-flight counter** (avoids momentarily relaxing the cap during reload) |
 | Validation gate | Before applying, the same `ConfigValidator` as `--test-config` runs (including YARP route transform validation); invalid config is rejected, the last valid config is kept, `lastError` is recorded, and the service stays up |
 
 - **Routes / clusters** (`ReverseProxy`) keep using YARP's `IConfiguration` reloadOnChange — behavior unchanged.

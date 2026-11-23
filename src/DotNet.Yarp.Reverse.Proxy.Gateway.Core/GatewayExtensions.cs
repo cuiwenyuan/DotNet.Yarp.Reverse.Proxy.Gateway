@@ -32,6 +32,7 @@ public static class GatewayExtensions
         services.AddSingleton(options.Admin);
         services.AddSingleton(options.NginxAccessLog);
         services.AddSingleton(options.CorrelationId);
+        services.AddSingleton(options.ConcurrencyLimit);
         services.AddSingleton<NginxAccessLogWriter>();
         services.AddSingleton<SimpleMemoryCache>();
         services.AddSingleton<GatewayMetrics>();
@@ -39,6 +40,7 @@ public static class GatewayExtensions
         // 有派生状态的组件：限流器令牌桶、IP 规则集。热重载时会经 ApplyOptions 原地重建。
         services.AddSingleton(new RateLimitState(options.RateLimit));
         services.AddSingleton(new IpFilterState(options.IpFilter));
+        services.AddSingleton(new ConcurrencyLimitState(options.ConcurrencyLimit));
         services.AddSingleton<GatewayConfigReloader>();
         return services;
     }
@@ -55,10 +57,11 @@ public static class GatewayExtensions
     {
         services.AddSingleton(sp =>
         {
-            var options = sp.GetRequiredService<GatewayOptions>();
-            var rateLimitState = sp.GetRequiredService<RateLimitState>();
-            var ipFilterState = sp.GetRequiredService<IpFilterState>();
-            return new GatewayHotReload(configPath, options, rateLimitState, ipFilterState, validate);
+        var options = sp.GetRequiredService<GatewayOptions>();
+        var rateLimitState = sp.GetRequiredService<RateLimitState>();
+        var ipFilterState = sp.GetRequiredService<IpFilterState>();
+        var concurrencyState = sp.GetRequiredService<ConcurrencyLimitState>();
+        return new GatewayHotReload(configPath, options, rateLimitState, ipFilterState, concurrencyState, validate);
         });
         return services;
     }
@@ -122,10 +125,10 @@ public static class GatewayExtensions
     /// <summary>
     /// 入口统一治理中间件顺序（最外层到最内层）：
     ///   AspxBlocker(扩展名黑名单) -> SecurityHeaders(安全响应头) -> IpFilter(IP黑白名单)
-    ///   -> RequestSize(请求体大小限制) -> CORS -> RateLimit(限流) -> CircuitBreaker(熔断)
-    ///   -> ApiKeyAuth(API Key) -> JwtAuth(JWT Bearer) -> ResponseCache(响应缓存)
-    ///   -> LocationRewrite(重定向改写)
-    /// 说明：安全头/黑名单/体积限制尽早拦截；认证支持 Key 或 JWT 任一通过；
+    ///   -> RequestSize(请求体大小限制) -> CORS -> RateLimit(限流) -> ConcurrencyLimit(并发上限)
+    ///   -> CircuitBreaker(熔断) -> ApiKeyAuth(API Key) -> JwtAuth(JWT Bearer)
+    ///   -> ResponseCache(响应缓存) -> LocationRewrite(重定向改写)
+    /// 说明：安全头/黑名单/体积限制尽早拦截；先限速再限并发最后熔断；认证支持 Key 或 JWT 任一通过；
     /// ResponseCache 在认证之后缓存已授权响应的幂等结果；LocationRewrite 放最内层，
     /// 在 YARP 产生 3xx 响应后改写 Location。
     /// </summary>
@@ -138,6 +141,7 @@ public static class GatewayExtensions
             .UseMiddleware<RequestSizeLimitMiddleware>()
             .UseMiddleware<CorsMiddleware>()
             .UseMiddleware<RateLimitMiddleware>()
+            .UseMiddleware<ConcurrencyLimitMiddleware>()
             .UseMiddleware<CircuitBreakerMiddleware>()
             .UseMiddleware<ApiKeyAuthMiddleware>()
             .UseMiddleware<JwtAuthMiddleware>()

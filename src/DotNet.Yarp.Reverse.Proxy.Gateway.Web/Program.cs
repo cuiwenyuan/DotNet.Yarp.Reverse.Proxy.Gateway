@@ -127,7 +127,7 @@ app.UseMiddleware<ProxyLoggingMiddleware>();
 app.UseGatewayRetry();
 
 // (4) 入口统一治理：
-//     AspxBlocker -> SecurityHeaders -> IpFilter -> RequestSize -> CORS -> 限流 -> 熔断
+//     AspxBlocker -> SecurityHeaders -> IpFilter -> RequestSize -> CORS -> 限流 -> 并发上限 -> 熔断
 //     -> ApiKey 认证 -> JWT 认证 -> 响应缓存 -> LocationRewrite。
 app.UseGatewayGovernance();
 
