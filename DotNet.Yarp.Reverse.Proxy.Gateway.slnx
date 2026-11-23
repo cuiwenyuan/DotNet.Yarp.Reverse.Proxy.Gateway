@@ -6,4 +6,7 @@
   <Folder Name="/tools/">
     <Project Path="tools/NginxConfigConverter.UI/NginxConfigConverter.UI.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests.csproj" />
+  </Folder>
 </Solution>

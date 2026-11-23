@@ -193,6 +193,9 @@ cd DotNet.Yarp.Reverse.Proxy.Gateway
 # 2) 还原并构建（三目标框架，Release）
 dotnet build -c Release
 
+# 2.0) 治理指标单元测试（零 NuGet 测试程序，8 项断言，退出码 0 = 通过）
+dotnet run --project tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests -c Release --no-build
+
 # 2.1) 配置预检（可选，等价 nginx -t）：校验路由/集群唯一性与后端地址合法性
 dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o publish
 dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK
@@ -587,12 +590,13 @@ git push origin v1.1.2026.1120
 推送 `v*` tag 后，[`release.yml`](.github/workflows/release.yml) 自动执行：
 
 1. **构建门禁**：net6.0 + net8.0 + net10.0 三框架 `dotnet build -c Release`，0 错误；
-2. **配置预检门禁**：`--test-config`（等价 `nginx -t`，以 net10.0 产物执行），失败即中止；
-3. **确定版本**：从 tag 提取版本号并校验 NewLife 规则，失败即中止；
-4. **发布打包**：publish net10.0 / net8.0 / net6.0（框架依赖）→
+2. **单测门禁**：`tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests` 纯 BCL 测试程序，覆盖治理指标/熔断/热重载状态，失败即中止；
+3. **配置预检门禁**：`--test-config`（等价 `nginx -t`，以 net10.0 产物执行），失败即中止；
+4. **确定版本**：从 tag 提取版本号并校验 NewLife 规则，失败即中止；
+5. **发布打包**：publish net10.0 / net8.0 / net6.0（框架依赖）→
    `gateway-net10.0-v1.1.2026.1120.zip`、`gateway-net8.0-v1.1.2026.1120.zip`、
    `gateway-net6.0-v1.1.2026.1120.zip`；
-5. **创建 Release**：标题 `Gateway v1.1.2026.1120`，上传三个 zip + 自动生成 release notes，
+6. **创建 Release**：标题 `Gateway v1.1.2026.1120`，上传三个 zip + GUI 工具 zip + 自动生成 release notes，
    并标记为最新（latest）。
 
 ### 部署产物

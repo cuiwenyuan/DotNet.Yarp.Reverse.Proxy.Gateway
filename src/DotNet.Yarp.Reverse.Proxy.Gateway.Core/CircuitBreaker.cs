@@ -38,13 +38,16 @@ public sealed class CircuitBreaker
     {
         lock (_gate)
         {
+            // ApplyOptions 走 Volatile.Write；这里必须用 Volatile.Read 配对，保证热重载后读到的
+            // 是新配置引用（lock 只保护状态，不保护来自锁外的配置写入）。
+            var options = Volatile.Read(ref _options);
             switch (_state)
             {
                 case CircuitBreakerState.Closed:
                     return true;
 
                 case CircuitBreakerState.Open:
-                    var openSpan = TimeSpan.FromSeconds(Math.Max(1, _options.OpenSeconds)).Ticks;
+                    var openSpan = TimeSpan.FromSeconds(Math.Max(1, options.OpenSeconds)).Ticks;
                     if (DateTime.UtcNow.Ticks - _openedAtTicks >= openSpan)
                     {
                         _state = CircuitBreakerState.HalfOpen;
@@ -54,7 +57,7 @@ public sealed class CircuitBreaker
                     return false;
 
                 default: // HalfOpen
-                    if (_halfOpenInFlight < Math.Max(1, _options.HalfOpenMaxRequests))
+                    if (_halfOpenInFlight < Math.Max(1, options.HalfOpenMaxRequests))
                     {
                         _halfOpenInFlight++;
                         return true;
@@ -83,6 +86,7 @@ public sealed class CircuitBreaker
     {
         lock (_gate)
         {
+            var options = Volatile.Read(ref _options);
             if (_state == CircuitBreakerState.HalfOpen)
             {
                 _state = CircuitBreakerState.Open;
@@ -92,7 +96,7 @@ public sealed class CircuitBreaker
             }
 
             _failureCount++;
-            if (_failureCount >= Math.Max(1, _options.FailureThreshold))
+            if (_failureCount >= Math.Max(1, options.FailureThreshold))
             {
                 _state = CircuitBreakerState.Open;
                 _openedAtTicks = DateTime.UtcNow.Ticks;

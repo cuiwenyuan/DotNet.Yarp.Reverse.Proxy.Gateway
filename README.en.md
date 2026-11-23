@@ -212,6 +212,9 @@ cd DotNet.Yarp.Reverse.Proxy.Gateway
 # 2) Restore and build (multi-targeting, Release)
 dotnet build -c Release
 
+# 2.0) Governance-metrics unit tests (zero-NuGet harness, 8 checks, exit code 0 = pass)
+dotnet run --project tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests -c Release --no-build
+
 # 2.1) Config precheck (optional, like `nginx -t`): validates route/cluster uniqueness and backend addresses
 dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o publish
 dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK
@@ -614,14 +617,16 @@ git push origin v1.1.2026.1120
 Pushing a `v*` tag triggers [`release.yml`](.github/workflows/release.yml) automatically:
 
 1. **Build gate**: multi-TFM `dotnet build -c Release` (net6.0 + net8.0 + net10.0), zero errors;
-2. **Config precheck gate**: `--test-config` (equivalent to `nginx -t`, run against the net10.0
+2. **Unit-test gate**: the pure-BCL harness in `tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests`
+   covers governance metrics, circuit-breaker state and hot-reload state preservation; abort on failure;
+3. **Config precheck gate**: `--test-config` (equivalent to `nginx -t`, run against the net10.0
    artifacts), abort on failure;
-3. **Determine version**: extract from the tag and validate against the NewLife rule, abort on failure;
-4. **Publish & package**: publish net10.0 / net8.0 / net6.0 (framework-dependent) →
+4. **Determine version**: extract from the tag and validate against the NewLife rule, abort on failure;
+5. **Publish & package**: publish net10.0 / net8.0 / net6.0 (framework-dependent) →
    `gateway-net10.0-v1.1.2026.1120.zip`, `gateway-net8.0-v1.1.2026.1120.zip`,
    `gateway-net6.0-v1.1.2026.1120.zip`;
-5. **Create Release**: titled `Gateway v1.1.2026.1120`, upload all three zips + auto-generated release
-   notes, and mark it as latest.
+6. **Create Release**: titled `Gateway v1.1.2026.1120`, upload the three gateway zips + the GUI
+   converter zip + auto-generated release notes, and mark it as latest.
 
 ### Deployment artifact
 

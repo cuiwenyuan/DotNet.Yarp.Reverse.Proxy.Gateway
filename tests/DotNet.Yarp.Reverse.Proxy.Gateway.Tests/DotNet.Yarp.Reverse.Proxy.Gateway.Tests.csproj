@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- 测试程序只跑在开发环境，锁定当前 LTS；不引入任何 NuGet。 -->
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 仅引用被测类库；NewLife.Core 通过项目引用间接带入，不新增包。 -->
+    <ProjectReference Include="../../src/DotNet.Yarp.Reverse.Proxy.Gateway.Core/DotNet.Yarp.Reverse.Proxy.Gateway.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

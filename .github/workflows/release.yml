@@ -41,6 +41,9 @@ jobs:
       - name: Restore & build (Release, net6.0 + net8.0 + net10.0)
         run: dotnet build -c Release
 
+      - name: Governance metrics unit tests (zero-NuGet harness)
+        run: dotnet run --project tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests -c Release --no-build
+
       - name: Config precheck (--test-config, equivalent to nginx -t)
         shell: pwsh
         run: |

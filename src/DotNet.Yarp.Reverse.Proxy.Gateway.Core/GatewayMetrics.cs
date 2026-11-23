@@ -375,6 +375,16 @@ public class MetricsMiddleware
         {
             await _next(context);
         }
+        catch
+        {
+            // 未处理异常到达本层时 Response.StatusCode 通常仍是默认的 200；
+            // 若不在抛出前修正，状态码分布会错误地记成 200。响应已开始则无法改写，保持原值。
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            }
+            throw;
+        }
         finally
         {
             sw.Stop();

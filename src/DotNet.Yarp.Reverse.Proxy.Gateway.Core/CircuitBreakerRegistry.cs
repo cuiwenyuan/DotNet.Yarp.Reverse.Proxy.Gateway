@@ -17,7 +17,9 @@ public sealed class CircuitBreakerRegistry
     /// <summary>获取或创建指定分桶的熔断器。</summary>
     public CircuitBreaker GetOrAdd(string key)
     {
-        return _breakers.GetOrAdd(key, _ => new CircuitBreaker(_options));
+        // 与 ApplyOptions 的 Volatile.Write 配对，避免新分桶拿到旧配置引用。
+        var options = Volatile.Read(ref _options);
+        return _breakers.GetOrAdd(key, _ => new CircuitBreaker(options));
     }
 
     /// <summary>当前所有分桶的状态快照（供 /metrics 与排障使用）。</summary>
