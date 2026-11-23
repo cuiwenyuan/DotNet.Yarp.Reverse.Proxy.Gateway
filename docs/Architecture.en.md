@@ -29,35 +29,36 @@ A **single-process, single-config-file** reverse-proxy gateway that replaces ngi
 
 ### 1.1 Overall architecture
 
+![Overall architecture: public client → IIS (ANCM) → Gateway.Web / Gateway.Core middleware pipeline → YARP → backend clusters](images/architecture-overview-en.png)
+
+Three blocks: traffic entry on the left (IIS + ANCM hosting `w3wp.exe`), the host-layer and
+governance-layer middleware pipeline outer→inner in the middle, and configuration hot reload,
+observability endpoints plus the dependency rule on the right. Vector version:
+[architecture-overview-en.svg](images/architecture-overview-en.svg) (scales losslessly / prints cleanly).
+
+<details>
+<summary>Mermaid source (equivalent to the image above; renders on GitHub / Typora / VS Code. Re-export the static image after editing to keep both in sync)</summary>
+
+```mermaid
+flowchart TB
+    client["Public client"] -->|"HTTPS 443"| iis["IIS (ANCM v2, inprocess)<br/>gateway process hosted inside w3wp.exe"]
+
+    subgraph web["Gateway.Web (host layer)"]
+        prog["Program.cs: pipeline assembly / CLI (--test-config, --convert-nginx)<br/>ConfigValidator (config precheck) · WeightedLoadBalancingPolicy (weighted LB)"]
+        core["Gateway.Core (governance · pure BCL, no 3rd-party gateway)<br/>ForwardedHeaders → CorrelationId → AccessLog → Metrics → Admin<br/>Compression → ProxyLogging → Retry<br/>AspxBlocker → SecurityHeaders → IpFilter → RequestSize → CORS<br/>RateLimit → ConcurrencyLimit → CircuitBreaker → ApiKeyAuth → JwtAuth<br/>ResponseCache → LocationRewrite → FileServer<br/>Shared state: RateLimitState / IpFilterState / ConcurrencyLimitState / CircuitBreakerRegistry"]
+        prog --> core
+    end
+
+    iis --> prog
+    core --> yarp["YARP forwarding kernel<br/>routing · load balancing · health checks · pooled connections · WebSocket / gRPC"]
+    yarp -->|"forward over pooled HTTP"| api["api-cluster<br/>5101 / 5102"]
+    yarp --> webc["web-cluster<br/>5200"]
+
+    cfg["appsettings.json<br/>ReverseProxy: routes / clusters / transforms<br/>Gateway: rate limit / breaker / cache / logs / metrics"] -.->|"hot reload ≤1s (validation gate + snapshot publish)"| core
+    obs["/health · /metrics · /admin/status · /admin/reload (localhost only)"] -.->|"metrics & state"| core
 ```
-                    ┌──────────────────────────────────────────────────────┐
-                    │                 Windows Server                        │
-                    │                                                        │
-   Public client ──HTTPS──▶  IIS (ANCM v2, inprocess)                        │
-                    │   │  gateway runs inside w3wp.exe                     │
-                    │   ▼                                                  │
-                    │  ┌──────────────────────────────────────────────┐    │
-                    │  │     DotNet.Yarp.Reverse.Proxy.Gateway.Web    │    │
-                    │  │  ──────────────────────────────────────────  │    │
-                    │  │   Program.cs: pipeline assembly / precheck   │    │
-                    │  │   ConfigValidator (--test-config)            │    │
-                    │  │   WeightedLoadBalancingPolicy (weighted)     │    │
-                    │  ├──────────────────────────────────────────────┤    │
-                    │  │       Gateway.Core (self-built governance)    │    │
-                    │  │  ┌────────────────────────────────────────┐  │    │
-                    │  │  │ Middleware pipeline (sec. 4, outer→inner)│  │    │
-                    │  │  │  Metrics → Compression → ProxyLogging   │  │    │
-                    │  │  │  → Retry → governance group →           │  │    │
-                    │  │  │  ResponseCache → LocationRewrite        │  │    │
-                    │  │  └────────────────────────────────────────┘  │    │
-                    │  │  Shared state: RateLimitState / IpFilterState│    │
-                    │  │  (hot-reloadable via POST /admin/reload)     │    │
-                    │  └──────────────────────────────────────────────┘    │
-                    │               │  YARP forwarding (HTTP client pool)   │
-                    │               ▼                                      │
-                    │  Backends: api-cluster (5101/5102)  web-cluster (5200)│
-                    └──────────────────────────────────────────────────────┘
-```
+
+</details>
 
 ---
 

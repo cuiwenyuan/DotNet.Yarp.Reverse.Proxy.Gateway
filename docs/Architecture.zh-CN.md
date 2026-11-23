@@ -25,35 +25,35 @@
 
 ### 1.1 总体架构图
 
+![总体架构图：公网客户端 → IIS(ANCM) → Gateway.Web / Gateway.Core 中间件管线 → YARP → 后端集群](images/architecture-overview-zh.png)
+
+图分三块：左侧是流量入口（IIS + ANCM 承载 `w3wp.exe`），中间自外向内是宿主层与治理层的中间件管线，
+右侧是配置热重载、可观测性端点与依赖边界。矢量版见
+[architecture-overview-zh.svg](images/architecture-overview-zh.svg)（可无损缩放/打印）。
+
+<details>
+<summary>Mermaid 源码（与上图等价；GitHub / Typora / VS Code 可直接渲染。改动后请重新导出静态图，保持两者一致）</summary>
+
+```mermaid
+flowchart TB
+    client["公网客户端"] -->|"HTTPS 443"| iis["IIS (ANCM v2, inprocess)<br/>网关进程托管在 w3wp.exe 内"]
+
+    subgraph web["Gateway.Web（宿主层）"]
+        prog["Program.cs：管线组装 / CLI（--test-config、--convert-nginx）<br/>ConfigValidator（配置预检） · WeightedLoadBalancingPolicy（加权 LB）"]
+        core["Gateway.Core（治理层 · 纯 BCL 自研，无第三方网关组件）<br/>ForwardedHeaders → CorrelationId → AccessLog → Metrics → Admin<br/>Compression → ProxyLogging → Retry<br/>AspxBlocker → SecurityHeaders → IpFilter → RequestSize → CORS<br/>RateLimit → ConcurrencyLimit → CircuitBreaker → ApiKeyAuth → JwtAuth<br/>ResponseCache → LocationRewrite → FileServer<br/>共享状态：RateLimitState / IpFilterState / ConcurrencyLimitState / CircuitBreakerRegistry"]
+        prog --> core
+    end
+
+    iis --> prog
+    core --> yarp["YARP 转发内核<br/>路由匹配 · 负载均衡 · 健康检查 · 连接池 · WebSocket / gRPC"]
+    yarp -->|"HTTP 连接池转发"| api["api-cluster<br/>5101 / 5102"]
+    yarp --> webc["web-cluster<br/>5200"]
+
+    cfg["appsettings.json<br/>ReverseProxy：路由 / 集群 / transforms<br/>Gateway：限流 / 熔断 / 缓存 / 日志 / 指标"] -.->|"热重载 ≤1s（校验闸门 + 快照发布）"| core
+    obs["/health · /metrics · /admin/status · /admin/reload（仅 localhost）"] -.->|"指标与状态"| core
 ```
-                    ┌──────────────────────────────────────────────────────┐
-                    │                 Windows Server                        │
-                    │                                                        │
-  公网客户端 ──HTTPS──▶  IIS (ANCM v2, inprocess)                            │
-                    │   │  w3wp.exe 内运行网关进程                          │
-                    │   ▼                                                  │
-                    │  ┌──────────────────────────────────────────────┐    │
-                    │  │     DotNet.Yarp.Reverse.Proxy.Gateway.Web    │    │
-                    │  │  ──────────────────────────────────────────  │    │
-                    │  │   Program.cs：管线组装 / 配置预检              │    │
-                    │  │   ConfigValidator（--test-config）           │    │
-                    │  │   WeightedLoadBalancingPolicy（加权策略）      │    │
-                    │  ├──────────────────────────────────────────────┤    │
-                    │  │       Gateway.Core（自研治理组件库）            │    │
-                    │  │  ┌────────────────────────────────────────┐  │    │
-                    │  │  │ 中间件管线（见第 4 节，由外到内）          │  │    │
-                    │  │  │  Metrics → Compression → ProxyLogging   │  │    │
-                    │  │  │  → Retry → 治理组（拦截/限流/熔断/认证）   │  │    │
-                    │  │  │  → ResponseCache → LocationRewrite      │  │    │
-                    │  │  └────────────────────────────────────────┘  │    │
-                    │  │  共享状态：RateLimitState / IpFilterState     │    │
-                    │  │  （支持 POST /admin/reload 在线热重载）        │    │
-                    │  └──────────────────────────────────────────────┘    │
-                    │               │  YARP 转发（HTTP 客户端连接池）        │
-                    │               ▼                                      │
-                    │  后端集群：api-cluster（5101/5102）  web-cluster（5200） │
-                    └──────────────────────────────────────────────────────┘
-```
+
+</details>
 
 ---
 
