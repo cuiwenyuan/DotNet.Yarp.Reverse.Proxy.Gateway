@@ -169,7 +169,10 @@ internal sealed class MainForm : Form
             }
 
             var sw = Stopwatch.StartNew();
-            var result = DotNet.Yarp.Reverse.Proxy.Gateway.Core.NginxConfigConverter.Convert(_sourceConf);
+            // 从文件转换时传入所在目录，include 才能按各自文件位置递归展开；
+            // 粘贴模式没有基准目录，转换器会给出"未展开 include"的提示而不是静默丢配置。
+            var baseDir = _rdoFile.Checked ? Path.GetDirectoryName(Path.GetFullPath(path)) : null;
+            var result = DotNet.Yarp.Reverse.Proxy.Gateway.Core.NginxConfigConverter.Convert(_sourceConf, baseDir);
             sw.Stop();
             _lastResult = result;
 

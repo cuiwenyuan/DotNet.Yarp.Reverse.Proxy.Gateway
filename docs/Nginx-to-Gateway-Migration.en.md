@@ -53,6 +53,43 @@ Key facts of the source nginx site (sanitized):
 | `keepalive_timeout 65` | Kestrel default (130s) | Not needed |
 | (not configured) rate limit / breaker / retry / auth | `Gateway` governance middleware enabled by default | Enhancements; see §3.2 |
 
+### 2.1 What the converter handles automatically (`--convert-nginx`)
+
+Anything that cannot be converted automatically is written to `GatewayMigrationHints` instead of being
+silently dropped:
+
+| nginx directive | Automatic | Notes |
+| --- | --- | --- |
+| `upstream` (multiple nodes / `weight` / `down`) | ✅ | `down` and `unix:` sockets are skipped with a note |
+| `include` (including `conf.d/*.conf` wildcards and nesting) | ✅ | Relative paths resolve against **each file's directory**; duplicates/cycles are guarded, never loops |
+| Multiple `server { }` blocks | ✅ | `server_name` → `Match.Hosts`; notes summarise routes per `server #n` |
+| `location /prefix/` | ✅ | → `Match.Path: /prefix/{**catch-all}` |
+| `location = /exact` | ⚠️ approximate | YARP only does prefix matching; the exact path is emitted plus a review note |
+| `location ~ / ~*` regex, `@named` | ❌ | Written to hints, rewrite by hand |
+| `proxy_pass http://upstream` / absolute URL / with URI | ✅ | A URI adds `PathRemovePrefix` + `PathPrefix` |
+| `map $http_host $pool { … }` + `proxy_pass $pool` | ✅ | One route per Host; `default` only covers Hosts missing from the map, so it never steals specific ones |
+| `rewrite ^/old/ /new/ last;` (literal prefix) | ✅ | → `PathRemovePrefix('/old')` + `PathPrefix('/new')` |
+| `rewrite` with captures / `permanent` / `redirect` | ❌ | Use IIS URL Rewrite instead |
+| Static-value `proxy_set_header` | ✅ | → YARP `RequestHeader` / `Set` |
+| `proxy_set_header` with `$variables` | ❌ | Replace with placeholders such as `{RemoteIpAddress}` per the table above |
+| `client_max_body_size` | ⚠️ number only | The note gives you the converted `Gateway:RequestSize:MaxBytes` |
+| TLS / `root` / `try_files` / rate limits / cache | ❌ | Configure manually per §2 and §3 |
+
+**Recommended flow (convert → diff → precheck → merge)**:
+
+```bash
+# 1) Convert (includes are expanded)
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C://nginx//nginx.conf -o converted.json
+
+# 2) Diff against the active config to see which routes/clusters/options would change (0 = same, 1 = different, 2 = error)
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --diff-config converted.json
+
+# 3) Precheck after merging the ReverseProxy node (equivalent to nginx -t)
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config
+```
+
+---
+
 ## 3. Equivalent gateway configuration
 
 ### 3.1 `ReverseProxy` node (drop-in replacement for the same node in `appsettings.json`)

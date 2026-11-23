@@ -33,6 +33,11 @@ public static class ConfigValidator
     {
         try
         {
+            // 相对路径必须先转绝对：ConfigurationBuilder.SetBasePath 只接受绝对路径，
+            // 否则运维执行 "--test-config --configPath candidate.json" 会得到
+            // "The path must be absolute" 这种与真实问题无关的报错。
+            configPath = Path.GetFullPath(configPath);
+
             if (!File.Exists(configPath))
             {
                 error = $"Config file not found: {configPath}";

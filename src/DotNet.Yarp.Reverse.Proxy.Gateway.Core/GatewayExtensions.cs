@@ -131,6 +131,15 @@ public static class GatewayExtensions
     }
 
     /// <summary>
+    /// 从 nginx.conf 文件转换：按文件所在目录递归展开 <c>include</c>（支持 conf.d/*.conf 通配符）。
+    /// 命令行 <c>--convert-nginx</c> 走这条路径。
+    /// </summary>
+    public static NginxConversionResult ConvertNginxConfigFile(string nginxConfPath)
+    {
+        return NginxConfigConverter.ConvertFile(nginxConfPath);
+    }
+
+    /// <summary>
     /// 入口统一治理中间件顺序（最外层到最内层）：
     ///   AspxBlocker(扩展名黑名单) -> SecurityHeaders(安全响应头) -> IpFilter(IP黑白名单)
     ///   -> RequestSize(请求体大小限制) -> CORS -> RateLimit(限流) -> ConcurrencyLimit(并发上限)

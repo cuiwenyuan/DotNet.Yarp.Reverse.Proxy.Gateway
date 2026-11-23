@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 using Microsoft.AspNetCore.Http;
 
@@ -31,6 +32,14 @@ internal static class Program
         await Run("管理端点 ReloadEnabled 开关与 XFF 伪造防护", TestAdminReloadGuards);
         await Run("Prometheus 计数器命名符合规范", TestCounterNaming);
         await Run("IP 规则热重载原子发布", TestIpFilterSnapshot);
+        await Run("转换器展开 include 并保留权重集群", TestConverterIncludes);
+        await Run("转换器对 include 环引用安全终止", TestConverterIncludeCycle);
+        await Run("转换器按 map 展开 Host 路由", TestConverterMapHosts);
+        await Run("转换器把字面 rewrite 转成路径变换", TestConverterRewrite);
+        await Run("转换器汇总多个 server 块", TestConverterMultiServerNotes);
+        await Run("配置差异：等价配置无差异", TestConfigDiffIdentical);
+        await Run("配置差异：识别路由/集群/治理参数变更", TestConfigDiffChanges);
+        await Run("配置差异：非法 JSON 报错", TestConfigDiffInvalidJson);
 
         Console.WriteLine();
         Console.WriteLine($"Tests: {_passed + _failed}, Passed: {_passed}, Failed: {_failed}");
@@ -529,5 +538,272 @@ internal static class Program
         Check(!state.IsBlocked("192.168.1.5"), "旧 deny 规则不得残留");
         Check(state.IsBlocked("172.16.0.1"), "新白名单应立即生效（名单外拒绝）");
         return Task.CompletedTask;
+    }
+
+    // ------------------------------------------------------------------ 转换器增强
+    private static Task TestConverterIncludes()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "conf.d"));
+            File.WriteAllText(Path.Combine(dir, "nginx.conf"), """
+                worker_processes 2;
+                events { worker_connections 1024; }
+                http {
+                    include conf.d/*.conf;
+                    upstream api { server 127.0.0.1:5101 weight=3; server 127.0.0.1:5102; }
+                    server {
+                        listen 80;
+                        server_name api.example.com;
+                        location /api/ { proxy_pass http://api; }
+                    }
+                }
+                """, new UTF8Encoding(false));
+            File.WriteAllText(Path.Combine(dir, "conf.d", "web.conf"), """
+                server {
+                    listen 80;
+                    server_name www.example.com;
+                    location / { proxy_pass http://127.0.0.1:5200; }
+                }
+                """, new UTF8Encoding(false));
+
+            var result = NginxConfigConverter.ConvertFile(Path.Combine(dir, "nginx.conf"));
+            Equal(2, result.RouteCount, "include 展开后应得到 2 条路由");
+
+            using var doc = JsonDocument.Parse(result.Json);
+            var routes = doc.RootElement.GetProperty("ReverseProxy").GetProperty("Routes");
+            var hosts = AllHosts(routes);
+            Check(hosts.Contains("www.example.com"), "conf.d 中被 include 的 server_name 应生成 Host 匹配");
+            Check(hosts.Contains("api.example.com"), "主配置中的 server_name 应生成 Host 匹配");
+
+            var clusters = doc.RootElement.GetProperty("ReverseProxy").GetProperty("Clusters");
+            Check(clusters.TryGetProperty("api", out var apiCluster), "upstream api 应转成集群");
+            Equal(2, apiCluster.GetProperty("Destinations").EnumerateObject().Count(), "upstream 的两个节点都应保留");
+            Equal("Weighted", apiCluster.GetProperty("LoadBalancingPolicy").GetString(), "存在 weight 时应使用 Weighted");
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+        return Task.CompletedTask;
+    }
+
+    private static Task TestConverterIncludeCycle()
+    {
+        var dir = NewTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "a.conf"), """
+                include b.conf;
+                http { server { server_name a.example.com; location /a/ { proxy_pass http://127.0.0.1:5101; } } }
+                """, new UTF8Encoding(false));
+            File.WriteAllText(Path.Combine(dir, "b.conf"), """
+                include a.conf;
+                http { server { server_name b.example.com; location /b/ { proxy_pass http://127.0.0.1:5102; } } }
+                """, new UTF8Encoding(false));
+
+            // 关键：环引用必须终止（不得栈溢出/死循环），并且给出提示。
+            var result = NginxConfigConverter.ConvertFile(Path.Combine(dir, "a.conf"));
+            Check(result.RouteCount >= 2, "环引用下仍应转换出两个文件里的路由");
+            Check(result.Notes.Any(n => n.Contains("重复引用", StringComparison.Ordinal)),
+                "重复 include 应给出提示而不是静默丢配置");
+        }
+        finally
+        {
+            TryDelete(dir);
+        }
+        return Task.CompletedTask;
+    }
+
+    private static Task TestConverterMapHosts()
+    {
+        var result = NginxConfigConverter.Convert("""
+            http {
+                upstream pool_a { server 127.0.0.1:5101; }
+                upstream pool_b { server 127.0.0.1:5102; }
+                map $http_host $backend {
+                    a.example.com pool_a;
+                    b.example.com pool_b;
+                    default       pool_a;
+                }
+                server {
+                    listen 80;
+                    server_name a.example.com b.example.com c.example.com;
+                    location / { proxy_pass $backend; }
+                }
+            }
+            """);
+
+        using var doc = JsonDocument.Parse(result.Json);
+        var routes = doc.RootElement.GetProperty("ReverseProxy").GetProperty("Routes");
+
+        var byHost = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var fallback = 0;
+        foreach (var r in routes.EnumerateObject())
+        {
+            var match = r.Value.GetProperty("Match");
+            var clusterId = r.Value.GetProperty("ClusterId").GetString()!;
+            if (!match.TryGetProperty("Hosts", out var h) || h.GetArrayLength() == 0)
+            {
+                fallback++;
+                continue;
+            }
+            foreach (var one in h.EnumerateArray()) byHost[one.GetString()!] = clusterId;
+        }
+
+        Equal("pool_a", byHost.GetValueOrDefault("a.example.com"), "map 键 a.example.com 应路由到 pool_a");
+        Equal("pool_b", byHost.GetValueOrDefault("b.example.com"), "map 键 b.example.com 应路由到 pool_b");
+        Equal("pool_a", byHost.GetValueOrDefault("c.example.com"), "未在 map 中的 c.example.com 应走 default（pool_a）");
+        Equal(0, fallback, "兜底路由必须限定在未覆盖的 Host 上，不能变成不限 Host 的抢流量路由");
+        Check(result.Notes.Any(n => n.Contains("按 map", StringComparison.Ordinal)), "应提示 map 展开结果");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestConverterRewrite()
+    {
+        var result = NginxConfigConverter.Convert("""
+            http {
+                upstream be { server 127.0.0.1:5200; }
+                server {
+                    server_name rw.example.com;
+                    location /old/ {
+                        rewrite ^/old/ /new/ last;
+                        proxy_pass http://be;
+                    }
+                    location /cap/ {
+                        rewrite ^/cap/(.*)$ /x/$1 last;
+                        proxy_pass http://be;
+                    }
+                }
+            }
+            """);
+
+        using var doc = JsonDocument.Parse(result.Json);
+        var routes = doc.RootElement.GetProperty("ReverseProxy").GetProperty("Routes");
+
+        var literal = routes.EnumerateObject().First(r => r.Name.Contains("old", StringComparison.Ordinal));
+        var transforms = literal.Value.GetProperty("Transforms").EnumerateArray().ToList();
+        Check(transforms.Any(t => t.TryGetProperty("PathRemovePrefix", out var v) && v.GetString() == "/old"),
+            "字面前缀 rewrite 应生成 PathRemovePrefix('/old')");
+        Check(transforms.Any(t => t.TryGetProperty("PathPrefix", out var v) && v.GetString() == "/new"),
+            "字面前缀 rewrite 应生成 PathPrefix('/new')");
+
+        var capture = routes.EnumerateObject().First(r => r.Name.Contains("cap", StringComparison.Ordinal));
+        Check(!capture.Value.TryGetProperty("Transforms", out _),
+            "含捕获组的 rewrite 不得生成错误的转换，应交回人工");
+        Check(result.Notes.Any(n => n.Contains("捕获组", StringComparison.Ordinal)),
+            "含捕获组的 rewrite 应给出明确提示");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestConverterMultiServerNotes()
+    {
+        var result = NginxConfigConverter.Convert("""
+            http {
+                server { server_name a.example.com; location /a/ { proxy_pass http://127.0.0.1:5101; } }
+                server { server_name b.example.com; location /b/ { proxy_pass http://127.0.0.1:5102; } }
+            }
+            """);
+        Check(result.Notes.Any(n => n.Contains("server #1", StringComparison.Ordinal)),
+            "多 server 块应输出第 1 个块的汇总");
+        Check(result.Notes.Any(n => n.Contains("server #2", StringComparison.Ordinal)),
+            "多 server 块应输出第 2 个块的汇总");
+        Equal(2, result.RouteCount, "两个 server 块应各生成一条路由");
+        return Task.CompletedTask;
+    }
+
+    // ------------------------------------------------------------------ 配置差异
+    private static Task TestConfigDiffIdentical()
+    {
+        const string json = """
+            {
+              "ReverseProxy": {
+                "Routes": { "api": { "ClusterId": "c1", "Match": { "Path": "/api/{**catch-all}" } } },
+                "Clusters": { "c1": { "Destinations": { "d1": { "Address": "http://127.0.0.1:5101/" } } } }
+              },
+              "Gateway": { "RateLimit": { "PerMinute": 600 } }
+            }
+            """;
+        var diff = GatewayConfigDiff.Compare(json, json);
+        Check(diff.Error is null, "等价配置不应报错：" + diff.Error);
+        Check(!diff.HasChanges, "等价配置不应产生差异行");
+        Check(diff.Lines.Count == 0, "等价配置的差异行应为空");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestConfigDiffChanges()
+    {
+        const string current = """
+            {
+              "ReverseProxy": {
+                "Routes": {
+                  "api": { "ClusterId": "c1", "Match": { "Path": "/api/{**catch-all}" } },
+                  "old": { "ClusterId": "c1", "Match": { "Path": "/old/{**catch-all}" } }
+                },
+                "Clusters": { "c1": { "Destinations": { "d1": { "Address": "http://127.0.0.1:5101/" } } } }
+              },
+              "Gateway": { "RateLimit": { "PerMinute": 600 } }
+            }
+            """;
+        const string candidate = """
+            {
+              "ReverseProxy": {
+                "Routes": {
+                  "api": { "ClusterId": "c2", "Match": { "Path": "/api/{**catch-all}" } },
+                  "web": { "ClusterId": "c2", "Match": { "Path": "/web/{**catch-all}" } }
+                },
+                "Clusters": { "c2": { "Destinations": { "d1": { "Address": "http://127.0.0.1:5200/" } } } }
+              },
+              "Gateway": { "RateLimit": { "PerMinute": 1200 } }
+            }
+            """;
+
+        var diff = GatewayConfigDiff.Compare(current, candidate);
+        Check(diff.Error is null, "合法 JSON 不应报错");
+        Check(diff.HasChanges, "有差异时必须标记 HasChanges");
+
+        Check(diff.Lines.Contains("+ ReverseProxy:Routes:web"), "应识别新增路由");
+        Check(diff.Lines.Contains("- ReverseProxy:Routes:old"), "应识别删除路由");
+        Check(diff.Lines.Contains("- ReverseProxy:Clusters:c1"), "应识别删除集群");
+        Check(diff.Lines.Contains("+ ReverseProxy:Clusters:c2"), "应识别新增集群");
+        Check(diff.Lines.Any(l => l.StartsWith("~ ReverseProxy:Routes:api:ClusterId", StringComparison.Ordinal)),
+            "应识别路由 ClusterId 变更");
+        Check(diff.Lines.Any(l => l.Contains("Gateway:RateLimit:PerMinute", StringComparison.Ordinal)),
+            "应识别治理参数变更");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestConfigDiffInvalidJson()
+    {
+        var diff = GatewayConfigDiff.Compare("{ not json", "{}");
+        Check(diff.Error is not null, "非法 JSON 必须返回错误而不是静默判定无差异");
+        return Task.CompletedTask;
+    }
+
+    // ------------------------------------------------------------------ 小工具
+    private static List<string> AllHosts(JsonElement routes)
+    {
+        var list = new List<string>();
+        foreach (var r in routes.EnumerateObject())
+        {
+            if (r.Value.GetProperty("Match").TryGetProperty("Hosts", out var hosts))
+            {
+                foreach (var h in hosts.EnumerateArray()) list.Add(h.GetString()!);
+            }
+        }
+        return list;
+    }
+
+    private static string NewTempDir()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "gw-conv-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static void TryDelete(string dir)
+    {
+        try { Directory.Delete(dir, recursive: true); } catch { /* 测试清理失败不影响结论 */ }
     }
 }

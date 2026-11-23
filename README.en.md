@@ -212,7 +212,7 @@ cd DotNet.Yarp.Reverse.Proxy.Gateway
 # 2) Restore and build (multi-targeting, Release)
 dotnet build -c Release
 
-# 2.0) Governance-metrics unit tests (zero-NuGet harness, 14 checks, exit code 0 = pass)
+# 2.0) Unit tests (zero-NuGet harness, 22 checks: governance metrics / breaker / rate limit / concurrency / cache / retry / converter / config diff, exit code 0 = pass)
 dotnet run --project tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests -c Release --no-build
 
 # 2.1) Config precheck (like `nginx -t`): uniqueness, ClusterId references, YARP cluster/transforms and numeric settings
@@ -528,13 +528,42 @@ Automatic mappings:
 | --- | --- |
 | Multiple `server` in `upstream` with `weight=N` | Cluster Destinations + `Metadata.Weight` + `LoadBalancingPolicy: Weighted` |
 | `server_name` | Route `Match.Hosts` |
+| Multiple `server { }` blocks | Each block yields its own routes; notes summarise `server #n` block by block |
+| `include conf.d/*.conf;` (wildcards and nesting) | Expanded recursively before conversion; relative paths resolve against **each file's own directory**, with duplicate/cycle protection |
 | `location /api/` + `proxy_pass http://pool` | Route `Match.Path: /api/{**catch-all}` + `ClusterId` |
+| `location = /health` | Route with the exact path (YARP only has prefix matching, a note asks you to review) |
 | `proxy_pass http://host:port/v1/` (with URI) | `PathRemovePrefix` + `PathPrefix` transforms |
+| `rewrite ^/old/ /new/ last;` (literal prefix) | `PathRemovePrefix('/old')` + `PathPrefix('/new')` |
+| `map $http_host $pool { a p1; default p1; }` + `proxy_pass $pool` | Expanded into one route per Host; `default` only covers Hosts missing from the map, so it never steals traffic from specific ones |
 | Static-value `proxy_set_header X Y` | YARP `RequestHeader` / `Set` transform |
+| `client_max_body_size 20m` | Note suggesting `Gateway:RequestSize:MaxBytes=20971520` |
 | `down` nodes / `unix:` sockets | Skipped with a note |
 
-> Directives that cannot be statically equivalent (regex locations, `$variables`, TLS certs, `root`, `rewrite`, rate limits, etc.) are written to the output JSON's `GatewayMigrationHints` node and to stderr for manual review; that node is not part of the runtime config and can be ignored when merging.
+> Directives that cannot be statically equivalent (regex locations, headers with nginx variables, TLS certs, `root`/`try_files`, captures or redirects in `rewrite`, rate limits, etc.) are written to the output JSON's `GatewayMigrationHints` node and to stderr for manual review; that node is not part of the runtime config and can be ignored when merging.
 > Always validate with `--test-config` after converting, and confirm each item against the [migration guide](docs/Nginx-to-Gateway-Migration.en.md).
+
+**(1.1) Inspect the diff before applying (`--diff-config`)**
+
+Compare a candidate config against the **currently active** one to see which routes, clusters and governance options would be added, removed or changed before you hot-reload:
+
+```bash
+# Diff against the active appsettings.json (exit code 0 = identical, 1 = differences, 2 = bad arguments/JSON)
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --diff-config converted.json
+
+# Point at a specific active config (defaults to --contentRoot/appsettings.json or the app directory)
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --diff-config converted.json --configPath C://inetpub//gateway//appsettings.json
+```
+
+Sample output (`+` added, `-` removed, `~` changed):
+
+```
++ ReverseProxy:Routes:root-beta-example-com
+- ReverseProxy:Routes:web-route
+~ ReverseProxy:Routes:api:ClusterId  "api-cluster" -> "api-cluster-v2"
+~ Gateway:RateLimit:PerMinute  600 -> 1200
+```
+
+> Only the `ReverseProxy` and `Gateway` subtrees are compared — logging framework and other host settings are ignored. Exit code 1 lets a release script gate on "there are changes".
 
 **(2) nginx-compatible access log (`Gateway:NginxAccessLog`)**
 

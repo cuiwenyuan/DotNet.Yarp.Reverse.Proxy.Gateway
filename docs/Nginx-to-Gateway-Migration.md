@@ -54,6 +54,42 @@
 | `keepalive_timeout 65` | Kestrel 默认（130s） | 无需配置 |
 | （未配置）限流 / 熔断 / 重试 / 认证 | `Gateway` 节点治理中间件默认开启 | 属增强，见 §3.2 |
 
+### 2.1 转换器自动支持范围（`--convert-nginx`）
+
+对照上表，转换器能自动处理到什么程度一目了然（不能自动等价的会写进 `GatewayMigrationHints`）：
+
+| nginx 指令 | 自动转换 | 说明 |
+| --- | --- | --- |
+| `upstream`（多节点 / `weight` / `down`） | ✅ | `down` 与 `unix:` socket 跳过并提示 |
+| `include`（含 `conf.d/*.conf` 通配符与嵌套） | ✅ | 相对路径按**各自文件所在目录**解析；重复/环引用有保护，不会死循环 |
+| 多个 `server { }` 块 | ✅ | `server_name` → `Match.Hosts`；notes 按 `server #n` 逐块汇总路由数 |
+| `location /prefix/` | ✅ | → `Match.Path: /prefix/{**catch-all}` |
+| `location = /exact` | ⚠️ 近似 | YARP 只有前缀匹配，按同名精确路径生成并提示复核 |
+| `location ~ / ~*` 正则、`@named` | ❌ | 写入 hints，需人工改写 |
+| `proxy_pass http://upstream` / 绝对 URL / 带 URI | ✅ | 带 URI 时生成 `PathRemovePrefix` + `PathPrefix` |
+| `map $http_host $pool { … }` + `proxy_pass $pool` | ✅ | 按 Host 展开多条路由；`default` 只覆盖未列出的 Host，不抢具体 Host 流量 |
+| `rewrite ^/old/ /new/ last;`（字面前缀） | ✅ | → `PathRemovePrefix('/old')` + `PathPrefix('/new')` |
+| `rewrite` 含捕获组 / `permanent` / `redirect` | ❌ | 建议在 IIS URL Rewrite 层实现 |
+| 静态值 `proxy_set_header` | ✅ | → YARP `RequestHeader` / `Set` |
+| 含 `$变量` 的 `proxy_set_header` | ❌ | `{RemoteIpAddress}` 等占位符需按上表人工替换 |
+| `client_max_body_size` | ⚠️ 提示数值 | 直接在提示里给出 `Gateway:RequestSize:MaxBytes` 的换算结果 |
+| TLS / `root` / `try_files` / 限流 / 缓存 | ❌ | 按 §2、§3 人工配置 |
+
+**推荐迁移流程（转换 → 看差异 → 预检 → 合并）**：
+
+```bash
+# 1) 转换（include 会一并展开）
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C://nginx//nginx.conf -o converted.json
+
+# 2) 与当前生效配置比对，先看清会动哪些路由/集群/治理参数（0=无差异，1=有差异，2=出错）
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --diff-config converted.json
+
+# 3) 合并 ReverseProxy 节点后预检（等价 nginx -t）
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config
+```
+
+---
+
 ## 3. 对应的网关配置
 
 ### 3.1 `ReverseProxy` 节点（可直接替换 `appsettings.json` 中同名节点）

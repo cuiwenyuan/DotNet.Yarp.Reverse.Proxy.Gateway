@@ -193,7 +193,7 @@ cd DotNet.Yarp.Reverse.Proxy.Gateway
 # 2) 还原并构建（三目标框架，Release）
 dotnet build -c Release
 
-# 2.0) 治理指标单元测试（零 NuGet 测试程序，14 项断言，退出码 0 = 通过）
+# 2.0) 单元测试（零 NuGet 测试程序，22 项断言：治理指标 / 熔断 / 限流 / 并发 / 缓存 / 重试 / 转换器 / 配置差异，退出码 0 = 通过）
 dotnet run --project tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests -c Release --no-build
 
 # 2.1) 配置预检（可选，等价 nginx -t）：校验路由/集群唯一性、ClusterId 引用、YARP cluster/transforms 与治理数值
@@ -499,14 +499,45 @@ dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --convert-nginx C:\nginx\nginx.
 | --- | --- |
 | `upstream` 的多个 `server` + `weight=N` | 集群 Destinations + `Metadata.Weight` + `LoadBalancingPolicy: Weighted` |
 | `server_name` | 路由 `Match.Hosts` |
+| 多个 `server { }` 块 | 每个块独立生成路由；notes 按 `server #n` 逐块汇总生成了几条 |
+| `include conf.d/*.conf;`（支持通配符与嵌套） | 递归展开后一并转换；相对路径按**各自文件所在目录**解析，重复/环引用有保护 |
 | `location /api/` + `proxy_pass http://pool` | 路由 `Match.Path: /api/{**catch-all}` + `ClusterId` |
+| `location = /health` | 生成精确路径路由（YARP 只有前缀模式，notes 提示复核） |
 | `proxy_pass http://host:port/v1/`（带 URI） | `PathRemovePrefix` + `PathPrefix` 变换 |
+| `rewrite ^/old/ /new/ last;`（字面前缀） | `PathRemovePrefix('/old')` + `PathPrefix('/new')` |
+| `map $http_host $pool { a p1; default p1; }` + `proxy_pass $pool` | 按 Host 展开成多条路由；`default` 只覆盖 map 里没列出的 Host，不会抢具体 Host 的流量 |
 | 静态值的 `proxy_set_header X Y` | YARP `RequestHeader` / `Set` 变换 |
+| `client_max_body_size 20m` | 提示映射为 `Gateway:RequestSize:MaxBytes=20971520` |
 | `down` 节点 / `unix:` socket | 自动跳过并提示 |
 
-> 不能静态等价的指令（正则 location、`$变量`、TLS 证书、`root`、`rewrite`、限流等）会写入输出 JSON 的
-> `GatewayMigrationHints` 节点和 stderr，供人工复核；该节点不参与运行配置，合并时忽略即可。
+> 不能静态等价的指令（正则 location、含 nginx 变量的 header、TLS 证书、`root`/`try_files`、
+> 带捕获组或跳转的 `rewrite`、限流等）会写入输出 JSON 的 `GatewayMigrationHints` 节点和 stderr，
+> 供人工复核；该节点不参与运行配置，合并时忽略即可。
 > 转换后务必用 `--test-config` 校验，并按 [迁移对照文档](docs/Nginx-to-Gateway-Migration.md) 逐项确认。
+
+**（1.1）改动前先看差异（`--diff-config`）**
+
+把候选配置与**当前生效配置**对比，先看清"会新增/删除/改动哪些路由、集群、治理参数"，再决定是否热重载：
+
+```bash
+# 与当前 appsettings.json 对比（退出码 0=等价，1=有差异，2=参数或 JSON 错误）
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --diff-config converted.json
+
+# 指定被对比的当前配置（默认读 --contentRoot/appsettings.json，或程序目录）
+dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --diff-config converted.json --configPath C:/inetpub/gateway/appsettings.json
+```
+
+输出示例（`+` 新增、`-` 删除、`~` 改动）：
+
+```
++ ReverseProxy:Routes:root-beta-example-com
+- ReverseProxy:Routes:web-route
+~ ReverseProxy:Routes:api:ClusterId  "api-cluster" -> "api-cluster-v2"
+~ Gateway:RateLimit:PerMinute  600 -> 1200
+```
+
+> 只比对 `ReverseProxy` 与 `Gateway` 两棵子树，日志框架等宿主配置的差异一律忽略；
+> 退出码 1 让它可以直接放进发布脚本做"有差异才继续"的判断。
 
 **（2）nginx 兼容访问日志（`Gateway:NginxAccessLog`）**
 

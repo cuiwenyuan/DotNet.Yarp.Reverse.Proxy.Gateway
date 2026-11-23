@@ -7,6 +7,20 @@ using Microsoft.AspNetCore.ResponseCompression;
 using Yarp.ReverseProxy;
 using Yarp.ReverseProxy.LoadBalancing;
 
+// 解析"当前生效配置"的路径：--configPath 优先，其次 --contentRoot/appsettings.json，最后程序目录。
+// 预检（--test-config）与差异比对（--diff-config）必须读同一份文件，避免"校验通过但比对了另一份"。
+string ResolveCurrentConfigPath()
+{
+    var explicitPathIdx = Array.FindIndex(args, a => a.Equals("--configPath", StringComparison.OrdinalIgnoreCase));
+    if (explicitPathIdx >= 0 && explicitPathIdx + 1 < args.Length) return args[explicitPathIdx + 1];
+
+    var contentRootIdx = Array.FindIndex(args, a => a.Equals("--contentRoot", StringComparison.OrdinalIgnoreCase));
+    var root = contentRootIdx >= 0 && contentRootIdx + 1 < args.Length
+        ? args[contentRootIdx + 1]
+        : AppContext.BaseDirectory;
+    return Path.Combine(root, "appsettings.json");
+}
+
 // (0) 配置预检模式（对应 nginx -t / GoReverseProxy --test-config）：
 //     dotnet DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config
 //     校验 appsettings.json（治理配置绑定、路由/集群唯一性、后端地址合法性），通过输出 OK 并退出 0。
@@ -14,24 +28,70 @@ if (args.Contains("--test-config") || args.Contains("-t"))
 {
     // 预检必须校验运维指定的同一份配置；原先固定读 BaseDirectory，
     // 导致 "--contentRoot <dir> --test-config" 出现"校验通过但实际配置非法"的假阴性。
-    string configPath;
-    var explicitPathIdx = Array.FindIndex(args, a => a.Equals("--configPath", StringComparison.OrdinalIgnoreCase));
-    var contentRootIdx = Array.FindIndex(args, a => a.Equals("--contentRoot", StringComparison.OrdinalIgnoreCase));
-    if (explicitPathIdx >= 0 && explicitPathIdx + 1 < args.Length)
-    {
-        configPath = args[explicitPathIdx + 1];
-    }
-    else
-    {
-        var root = contentRootIdx >= 0 && contentRootIdx + 1 < args.Length
-            ? args[contentRootIdx + 1]
-            : AppContext.BaseDirectory;
-        configPath = Path.Combine(root, "appsettings.json");
-    }
+    var configPath = ResolveCurrentConfigPath();
     var ok = ConfigValidator.Validate(configPath, out var configError);
     Console.WriteLine(ok ? "Configuration OK" : $"Configuration error: {configError}");
     // 校验失败必须以非零退出码返回，否则 CI 预检步骤（--test-config）形同虚设。
     if (!ok) Environment.ExitCode = 1;
+    return;
+}
+
+// (0.2) 配置差异预览：把候选配置与当前生效配置对比，先看清"会新增/删除/改动什么"再决定是否热重载。
+//   dotnet ...dll --diff-config <candidate.json> [--configPath <current.json> | --contentRoot <dir>]
+//   退出码：0 = 等价；1 = 有差异；2 = 参数或解析错误。
+var diffIdx = Array.FindIndex(args, a =>
+    a.Equals("--diff-config", StringComparison.OrdinalIgnoreCase) || a.Equals("--diff", StringComparison.OrdinalIgnoreCase));
+if (diffIdx >= 0)
+{
+    var candidatePath = diffIdx + 1 < args.Length && !args[diffIdx + 1].StartsWith('-') ? args[diffIdx + 1] : null;
+    if (string.IsNullOrWhiteSpace(candidatePath) || !File.Exists(candidatePath))
+    {
+        Console.Error.WriteLine("Usage: --diff-config <candidate.json> [--configPath <current.json>] [--contentRoot <dir>]");
+        Console.Error.WriteLine($"Candidate file not found: {candidatePath}");
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    var currentPath = ResolveCurrentConfigPath();
+    if (!File.Exists(currentPath))
+    {
+        Console.Error.WriteLine($"Current config not found: {currentPath}");
+        Environment.ExitCode = 2;
+        return;
+    }
+
+    try
+    {
+        var diff = GatewayConfigDiff.Compare(File.ReadAllText(currentPath), File.ReadAllText(candidatePath));
+        if (diff.Error is not null)
+        {
+            Console.Error.WriteLine("Config diff failed: " + diff.Error);
+            Environment.ExitCode = 2;
+            return;
+        }
+
+        Console.WriteLine($"Comparing {currentPath} -> {candidatePath}");
+        if (!diff.HasChanges)
+        {
+            Console.WriteLine("No differences (ReverseProxy routes/clusters and Gateway options are identical).");
+            return;
+        }
+
+        foreach (var line in diff.Lines) Console.WriteLine(line);
+        Console.WriteLine();
+        Console.WriteLine($"{diff.Lines.Count} change(s): " +
+                          $"+{diff.Lines.Count(l => l.StartsWith("+ "))} " +
+                          $"-{diff.Lines.Count(l => l.StartsWith("- "))} " +
+                          $"~{diff.Lines.Count(l => l.StartsWith("~ "))}");
+
+        // 与 diff(1) 一致：有差异时返回 1，便于脚本判断"要不要真的应用这份配置"。
+        Environment.ExitCode = 1;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine("Config diff failed: " + ex.Message);
+        Environment.ExitCode = 2;
+    }
     return;
 }
 
@@ -61,8 +121,8 @@ if (convertIdx >= 0)
     }
     try
     {
-        var text = File.ReadAllText(inputPath);
-        var result = GatewayExtensions.ConvertNginxConfig(text);
+        // 从文件转换（而不是传入文本）：这样 include 能按各自文件所在目录递归展开。
+        var result = GatewayExtensions.ConvertNginxConfigFile(inputPath);
         if (string.IsNullOrWhiteSpace(outputPath))
         {
             Console.WriteLine(result.Json);
