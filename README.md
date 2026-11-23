@@ -88,7 +88,8 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 | 安全响应头 | X-Frame-Options / nosniff / CSP / Referrer-Policy 等 | SecurityHeaders 插件 |
 | 监控指标 | `/metrics`（Prometheus 文本）+ `/health` 存活探针 | `stub_status` |
 | 管理状态端点 | `/admin/status`（JSON 摘要）+ `POST /admin/reload`（localhost 热重载治理配置） | nginx plus API |
-| 配置预检 | `--test-config` 启动前校验配置（唯一性/地址合法性） | `nginx -t` |
+| 配置预检 | `--test-config` 启动前校验配置（唯一性/地址合法性/transforms 由 YARP 自身校验），失败返回非零退出码 | `nginx -t` |
+| 请求链路 ID | 生成/透传 `X-Request-ID`，贯穿 proxy log、access log 与 XTrace，响应头回写 | `$request_id` / `X-Request-ID` |
 | 上游超时控制 | 连接超时 + 集群 ActivityTimeout | `proxy_connect_timeout` / `proxy_read_timeout` |
 | 加权负载均衡 | 按 Metadata.Weight 加权随机（可配权重） | upstream `weight` |
 | 灰度发布（canary） | YARP 路由按 header 匹配分流到不同集群 | 分流/灰度配置 |
@@ -421,6 +422,11 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | `NginxAccessLog:MaxFileBytes` | `10485760` | 单文件轮转阈值（字节），0=不轮转；超限滚动为 `.1`/`.2` |
 | `NginxAccessLog:RetainedFiles` | `5` | 保留的历史轮转文件数 |
 | `NginxAccessLog:IgnoreStatusCodes` | `[]` | 命中这些状态码的请求不写访问日志 |
+| `NginxAccessLog:IncludeCorrelationId` | `false` | 是否在标准字段之后追加链路 ID 末段（默认关以保持严格 nginx 格式） |
+| `CorrelationId:Enabled` | `true` | 是否启用请求链路 ID |
+| `CorrelationId:HeaderName` | `X-Request-ID` | 请求头 / 响应头名称 |
+| `CorrelationId:EchoResponseHeader` | `true` | 是否把 ID 回写响应头供客户端追踪 |
+| `CorrelationId:TrustIncoming` | `true` | 是否信任并透传客户端传入的合法 ID（非法 ID 一律重新生成） |
 
 ### 8.3 配置热重载（等价 nginx -s reload）
 
@@ -431,7 +437,7 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | 变更感知 | `JsonConfigProvider`（FileSystemWatcher 事件驱动，≤1s）+ 定时轮询兜底（~40s，覆盖原子替换 / 网络盘 / watcher 失效） |
 | 原地映射 | `ConfigHelper.MapTo` 把新配置原地写入已注入的 Options 单例（含嵌套对象与数组），持有引用的中间件零改动即见新值 |
 | 派生状态重建 | 限流令牌桶、IP 黑白名单 CIDR 规则集经 `Changed` 回调调 `ApplyOptions` 重建 |
-| 校验闸门 | 应用前先跑与 `--test-config` 相同的 `ConfigValidator`；非法配置被拦截、保留上一份有效配置、记录 `lastError`，服务不中断 |
+| 校验闸门 | 应用前先跑与 `--test-config` 相同的 `ConfigValidator`（含 YARP 路由 transforms 校验）；非法配置被拦截、保留上一份有效配置、记录 `lastError`，服务不中断 |
 
 - **路由/集群**（`ReverseProxy`）仍由 YARP 的 `IConfiguration` reloadOnChange 热加载，行为不变。
 - **手动兜底**：`POST /admin/reload`（仅 localhost）强制从磁盘重载，走同一套校验闸门；文件监听失效时可用。

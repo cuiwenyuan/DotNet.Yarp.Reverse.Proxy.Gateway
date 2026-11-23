@@ -14,6 +14,8 @@ if (args.Contains("--test-config") || args.Contains("-t"))
     var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
     var ok = ConfigValidator.Validate(configPath, out var configError);
     Console.WriteLine(ok ? "Configuration OK" : $"Configuration error: {configError}");
+    // 校验失败必须以非零退出码返回，否则 CI 预检步骤（--test-config）形同虚设。
+    if (!ok) Environment.ExitCode = 1;
     return;
 }
 
@@ -102,6 +104,9 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost
 });
+
+// (2.3) 请求链路 ID（X-Request-ID）：最外层生成/透传 ID，贯穿 proxy log / access log / XTrace。
+app.UseGatewayCorrelationId();
 
 // (2.4) nginx 兼容访问日志（可选）：挂在压缩外层，记录压缩后字节数，统计全部请求。
 app.UseGatewayAccessLog();

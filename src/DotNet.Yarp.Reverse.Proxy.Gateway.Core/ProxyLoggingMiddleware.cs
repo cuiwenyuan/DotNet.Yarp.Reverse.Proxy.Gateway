@@ -131,6 +131,8 @@ public class ProxyLoggingMiddleware
         var url = context.Request.Scheme + "://" + context.Request.Host + context.Request.Path;
         if (context.Request.QueryString.HasValue) url += context.Request.QueryString;
 
+        var requestId = CorrelationContext.FromHttpContext(context);
+
         if (_options.Json)
         {
             // 单行 JSON，便于 ELK / Loki 结构化采集
@@ -138,6 +140,7 @@ public class ProxyLoggingMiddleware
             {
                 ts = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
                 type = "proxy",
+                requestId,
                 method = context.Request.Method,
                 url,
                 clientIp = context.Connection.RemoteIpAddress?.ToString(),
@@ -153,6 +156,7 @@ public class ProxyLoggingMiddleware
 
         var sb = new StringBuilder();
         sb.Append('[').Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append("] PROXY ");
+        if (!string.IsNullOrEmpty(requestId)) sb.Append("[req=").Append(requestId).Append("] ");
         sb.Append(context.Request.Method).Append(' ');
         sb.Append(url);
         sb.Append(" <- ").Append(context.Connection.RemoteIpAddress);

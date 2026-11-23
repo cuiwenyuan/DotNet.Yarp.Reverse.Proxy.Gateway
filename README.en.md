@@ -94,7 +94,8 @@ and hard to fold into one unified operations system.
 | Security headers | X-Frame-Options / nosniff / CSP / Referrer-Policy etc. | SecurityHeaders plugin |
 | Metrics endpoint | `/metrics` (Prometheus text) + `/health` liveness probe | `stub_status` |
 | Admin endpoints | `/admin/status` (JSON summary) + `POST /admin/reload` (localhost hot reload of governance config) | nginx plus API |
-| Config precheck | `--test-config` validates config before startup (uniqueness/address validity) | `nginx -t` |
+| Config precheck | `--test-config` validates config before startup (uniqueness / address validity / transforms via YARP's own validator), exits non-zero on failure | `nginx -t` |
+| Request correlation ID | Generate / pass through `X-Request-ID` across proxy logs, access logs and XTrace, echoed in response | `$request_id` / `X-Request-ID` |
 | Upstream timeouts | Connect timeout + per-cluster ActivityTimeout | `proxy_connect_timeout` / `proxy_read_timeout` |
 | Weighted load balancing | Random by `Metadata.Weight` (configurable weights) | upstream `weight` |
 | Canary / gray release | YARP routes split by header match into different clusters | traffic-split config |
@@ -443,6 +444,11 @@ Example:
 | `NginxAccessLog:MaxFileBytes` | `10485760` | Rotation threshold in bytes; 0 = no rotation; rolls over to `.1`/`.2` |
 | `NginxAccessLog:RetainedFiles` | `5` | Number of rotated files to keep |
 | `NginxAccessLog:IgnoreStatusCodes` | `[]` | Requests with these status codes are not written to the access log |
+| `NginxAccessLog:IncludeCorrelationId` | `false` | Append the correlation ID as a trailing field (off by default to keep strict nginx format) |
+| `CorrelationId:Enabled` | `true` | Enable the request correlation ID |
+| `CorrelationId:HeaderName` | `X-Request-ID` | Request / response header name |
+| `CorrelationId:EchoResponseHeader` | `true` | Echo the ID in the response header for client-side tracing |
+| `CorrelationId:TrustIncoming` | `true` | Trust and pass through a valid client-supplied ID (invalid IDs are always regenerated) |
 
 ### 8.3 Configuration hot reload (equivalent to nginx -s reload)
 
@@ -453,7 +459,7 @@ Edit and save `appsettings.json` and **all `Gateway` governance settings take ef
 | Change detection | `JsonConfigProvider` (FileSystemWatcher events, ≤1s) + periodic polling fallback (~40s, covers atomic replacement / network drives / watcher failure) |
 | In-place mapping | `ConfigHelper.MapTo` writes new values into the already-injected Options singletons (including nested objects and arrays); middleware holding the references sees new values with zero code changes |
 | Derived-state rebuild | Rate-limit token bucket and IP CIDR rules are rebuilt via `ApplyOptions` in the `Changed` callback |
-| Validation gate | Before applying, the same `ConfigValidator` as `--test-config` runs; invalid config is rejected, the last valid config is kept, `lastError` is recorded, and the service stays up |
+| Validation gate | Before applying, the same `ConfigValidator` as `--test-config` runs (including YARP route transform validation); invalid config is rejected, the last valid config is kept, `lastError` is recorded, and the service stays up |
 
 - **Routes / clusters** (`ReverseProxy`) keep using YARP's `IConfiguration` reloadOnChange — behavior unchanged.
 - **Manual fallback**: `POST /admin/reload` (localhost only) forces a disk reload through the same validation gate; usable when file watching fails.

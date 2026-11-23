@@ -25,6 +25,31 @@ public class GatewayOptions
     public AdminOptions Admin { get; set; } = new();
     /// <summary>nginx 兼容访问日志（combined/common 格式 + 文件轮转）。</summary>
     public NginxAccessLogOptions NginxAccessLog { get; set; } = new();
+    /// <summary>请求链路 ID（X-Request-ID），贯穿所有日志便于排障。</summary>
+    public CorrelationIdOptions CorrelationId { get; set; } = new();
+}
+
+/// <summary>
+/// 请求链路 ID 配置（对应 appsettings.json 的 "Gateway:CorrelationId" 节点）。
+/// 生成或透传一个 ID，写入 HttpContext.Items、AsyncLocal 与响应头，贯穿代理日志/访问日志/XTrace。
+/// 纯 BCL 实现，零第三方 NuGet。
+/// </summary>
+public class CorrelationIdOptions
+{
+    /// <summary>是否启用链路 ID。默认开启。</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>请求头 / 响应头名称，默认 X-Request-ID。</summary>
+    public string HeaderName { get; set; } = "X-Request-ID";
+
+    /// <summary>是否把 ID 回写到响应头，便于客户端据此追踪。默认开启。</summary>
+    public bool EchoResponseHeader { get; set; } = true;
+
+    /// <summary>
+    /// 是否信任并透传客户端传入的 ID。默认开启（便于跨服务串联）。
+    /// 关闭时总是为新请求生成新 ID。无论开关，非法 ID（超长/含控制字符）都会被拒绝并重新生成。
+    /// </summary>
+    public bool TrustIncoming { get; set; } = true;
 }
 
 public class RateLimitOptions

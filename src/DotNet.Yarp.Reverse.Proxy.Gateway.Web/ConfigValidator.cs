@@ -1,5 +1,7 @@
 using DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Yarp.ReverseProxy.Configuration;
 
 namespace DotNet.Yarp.Reverse.Proxy.Gateway.Web;
 
@@ -8,11 +10,22 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Web;
 /// 启动前校验 appsettings.json：
 ///   1) "Gateway" 治理配置可成功绑定（GatewayOptions）；
 ///   2) ReverseProxy 路由 / 集群 Id 唯一；
-///   3) 每个 Destination.Address 必须是合法的 http/https 绝对 URI。
+///   3) 每个 Destination.Address 必须是合法的 http/https 绝对 URI；
+///   4) 每条路由的 Transforms 必须由 YARP 自身校验器认可（拦住 Unknown transform 等会在启动时崩溃的配置）。
 /// 任何一项不通过即返回错误，避免服务启动后才发现配置问题。
 /// </summary>
 public static class ConfigValidator
 {
+    // 复用 YARP 自带校验器，而非手写 transform key 白名单——后者会随 YARP 版本过时。
+    // IConfigValidator 无状态，静态缓存一次即可，供 --test-config 与热重载闸门共用。
+    private static readonly Lazy<IConfigValidator> YarpValidator = new(() =>
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddReverseProxy();
+        return services.BuildServiceProvider().GetRequiredService<IConfigValidator>();
+    });
+
     public static bool Validate(string configPath, out string? error)
     {
         try
@@ -81,6 +94,33 @@ public static class ConfigValidator
                 }
             }
 
+            // 4) 用 YARP 自带校验器验证每条路由的 Transforms。
+            //    这一步是 --test-config 的关键补强：此前非法的 transform（如 "RequestHeaders"
+            //    拼写错误）能通过预检，却在 YARP 启动时抛 "Unknown transform" 崩溃。
+            //    现在预检阶段即拦截，且与热重载闸门共用同一标准。
+            var validator = YarpValidator.Value;
+            foreach (var route in config.GetSection("ReverseProxy:Routes").GetChildren())
+            {
+                var transforms = ReadTransforms(route.GetSection("Transforms"));
+                if (transforms is null) continue;
+
+                var routeConfig = new RouteConfig
+                {
+                    RouteId = route.Key,
+                    ClusterId = route["ClusterId"] ?? string.Empty,
+                    Match = new RouteMatch { Path = route["Match:Path"] },
+                    Transforms = transforms
+                };
+                // 校验为纯内存 CPU 操作（无 I/O），同步等待不会死锁。
+                var routeErrors = validator.ValidateRouteAsync(routeConfig).AsTask().GetAwaiter().GetResult();
+                if (routeErrors.Count > 0)
+                {
+                    error = $"Invalid transforms in route '{route.Key}': "
+                          + string.Join("; ", routeErrors.Select(e => e.Message));
+                    return false;
+                }
+            }
+
             error = null;
             return true;
         }
@@ -89,5 +129,24 @@ public static class ConfigValidator
             error = ex.Message;
             return false;
         }
+    }
+
+    /// <summary>
+    /// 把配置里的 Transforms 节点还原为 YARP 期望的 IReadOnlyList&lt;IReadOnlyDictionary&lt;string,string&gt;&gt;。
+    /// 返回 null 表示该路由未配置 Transforms。
+    /// </summary>
+    private static IReadOnlyList<IReadOnlyDictionary<string, string>>? ReadTransforms(IConfigurationSection section)
+    {
+        if (!section.Exists()) return null;
+
+        var list = new List<IReadOnlyDictionary<string, string>>();
+        foreach (var item in section.GetChildren())
+        {
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in item.GetChildren())
+                dict[kv.Key] = kv.Value ?? string.Empty;
+            if (dict.Count > 0) list.Add(dict);
+        }
+        return list;
     }
 }

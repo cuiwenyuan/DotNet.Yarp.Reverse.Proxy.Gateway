@@ -30,6 +30,13 @@ public class NginxAccessLogOptions
 
     /// <summary>命中这些状态码的请求不写访问日志（如 /health 的 200 可按需过滤，默认不过滤）。</summary>
     public int[] IgnoreStatusCodes { get; set; } = Array.Empty<int>();
+
+    /// <summary>
+    /// 是否在标准 nginx 字段之后追加链路 ID 作为末段（形如 "reqid"）。
+    /// 默认关闭以保持严格的 nginx combined/common 格式，便于 GoAccess 等工具直接解析。
+    /// 开启后仍不影响前面标准字段的位置，只是行尾多一个引号字段。
+    /// </summary>
+    public bool IncludeCorrelationId { get; set; }
 }
 
 /// <summary>
@@ -204,9 +211,18 @@ public class NginxAccessLogMiddleware
             bytesSent.ToString(CultureInfo.InvariantCulture));
 
         var isCombined = !_options.Format.Equals("common", StringComparison.OrdinalIgnoreCase);
-        if (!isCombined) return common;
+        var line = isCombined
+            ? string.Concat(common, " \"", Escape(referer), "\" \"", Escape(userAgent), "\"")
+            : common;
 
-        return string.Concat(common, " \"", Escape(referer), "\" \"", Escape(userAgent), "\"");
+        // 可选：追加链路 ID 末段，把 access log 与 proxy log / XTrace 按同一 ID 串联。
+        if (_options.IncludeCorrelationId)
+        {
+            var requestId = CorrelationContext.FromHttpContext(context);
+            if (!string.IsNullOrEmpty(requestId))
+                line = string.Concat(line, " \"", Escape(requestId), "\"");
+        }
+        return line;
     }
 
     private static string ResolveClientIp(HttpContext context)

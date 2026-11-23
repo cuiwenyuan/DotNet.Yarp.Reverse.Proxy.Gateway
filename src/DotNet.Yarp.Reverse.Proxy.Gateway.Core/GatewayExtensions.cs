@@ -31,6 +31,7 @@ public static class GatewayExtensions
         services.AddSingleton(options.HttpTimeout);
         services.AddSingleton(options.Admin);
         services.AddSingleton(options.NginxAccessLog);
+        services.AddSingleton(options.CorrelationId);
         services.AddSingleton<NginxAccessLogWriter>();
         services.AddSingleton<SimpleMemoryCache>();
         services.AddSingleton<GatewayMetrics>();
@@ -97,6 +98,16 @@ public static class GatewayExtensions
     public static IApplicationBuilder UseGatewayAccessLog(this IApplicationBuilder app)
     {
         return app.UseMiddleware<NginxAccessLogMiddleware>();
+    }
+
+    /// <summary>
+    /// 请求链路 ID 中间件：生成/透传 X-Request-ID，写入 Items/AsyncLocal/响应头，
+    /// 贯穿 proxy log、access log 与 XTrace。应挂在管线最外层（其他日志与治理之前），
+    /// 确保所有下游组件都能读到 ID。
+    /// </summary>
+    public static IApplicationBuilder UseGatewayCorrelationId(this IApplicationBuilder app)
+    {
+        return app.UseMiddleware<CorrelationIdMiddleware>();
     }
 
     /// <summary>
