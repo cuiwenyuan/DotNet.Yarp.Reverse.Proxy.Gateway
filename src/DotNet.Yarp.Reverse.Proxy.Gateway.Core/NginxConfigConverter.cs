@@ -51,7 +51,7 @@ public static class NginxConfigConverter
             if (up.Args.Count == 0) continue;
             var name = up.Args[0];
             var servers = new List<UpstreamServer>();
-            foreach (var s in up.Children.Where(c => c.Name == "server"))
+            foreach (var s in up.Children.Where(c => c.Name.Equals("server", StringComparison.OrdinalIgnoreCase)))
             {
                 if (s.Args.Count == 0) continue;
                 var addr = s.Args[0];
@@ -103,7 +103,7 @@ public static class NginxConfigConverter
         {
             // server_name（取第一条 server_name 指令）
             var hostList = new List<string>();
-            var sn = server.Children.FirstOrDefault(c => c.Name == "server_name");
+            var sn = server.Children.FirstOrDefault(c => c.Name.Equals("server_name", StringComparison.OrdinalIgnoreCase));
             if (sn is not null)
             {
                 foreach (var h in sn.Args)
@@ -113,7 +113,7 @@ public static class NginxConfigConverter
                 }
             }
 
-            foreach (var loc in server.Children.Where(c => c.Name == "location"))
+            foreach (var loc in server.Children.Where(c => c.Name.Equals("location", StringComparison.OrdinalIgnoreCase)))
             {
                 if (loc.Args.Count == 0) continue;
                 var rawPath = loc.Args[^1];
@@ -133,7 +133,7 @@ public static class NginxConfigConverter
                     continue;
                 }
 
-                var proxyPass = loc.Children.FirstOrDefault(c => c.Name == "proxy_pass");
+                var proxyPass = loc.Children.FirstOrDefault(c => c.Name.Equals("proxy_pass", StringComparison.OrdinalIgnoreCase));
                 if (proxyPass is null || proxyPass.Args.Count == 0)
                 {
                     notes.Add($"location '{rawPath}' 无 proxy_pass（可能是静态 root 或 return），未生成路由，请人工处理。");
@@ -171,7 +171,7 @@ public static class NginxConfigConverter
                     notes.Add($"location '{rawPath}' 的 proxy_pass 带 URI '{rewriteUri}'，已生成 PathRemovePrefix/PathPrefix 变换，请复核路径拼接。");
                 }
 
-                foreach (var sh in loc.Children.Where(c => c.Name == "proxy_set_header"))
+                foreach (var sh in loc.Children.Where(c => c.Name.Equals("proxy_set_header", StringComparison.OrdinalIgnoreCase)))
                 {
                     if (sh.Args.Count < 2) continue;
                     var header = sh.Args[0];
@@ -341,7 +341,14 @@ public static class NginxConfigConverter
                 var sb = new StringBuilder();
                 while (i < s.Length && s[i] != quote)
                 {
-                    if (s[i] == '\\' && i + 1 < s.Length) { sb.Append(s[i + 1]); i += 2; }
+                    if (s[i] == '\\' && i + 1 < s.Length)
+                    {
+                        var next = s[i + 1];
+                        // nginx 引号内只把 \\ 与 \" / \' 当转义；其余反斜杠（如 Windows 路径
+                        // C:\new\site）必须原样保留，否则会被错误地删掉字符。
+                        if (next == '\\' || next == quote) { sb.Append(next); i += 2; }
+                        else { sb.Append('\\'); i++; }
+                    }
                     else sb.Append(s[i++]);
                 }
                 if (i < s.Length) i++;

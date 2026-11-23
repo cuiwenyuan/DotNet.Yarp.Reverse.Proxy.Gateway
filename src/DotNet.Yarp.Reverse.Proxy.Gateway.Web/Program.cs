@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 using DotNet.Yarp.Reverse.Proxy.Gateway.Web;
@@ -11,7 +12,22 @@ using Yarp.ReverseProxy.LoadBalancing;
 //     校验 appsettings.json（治理配置绑定、路由/集群唯一性、后端地址合法性），通过输出 OK 并退出 0。
 if (args.Contains("--test-config") || args.Contains("-t"))
 {
-    var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+    // 预检必须校验运维指定的同一份配置；原先固定读 BaseDirectory，
+    // 导致 "--contentRoot <dir> --test-config" 出现"校验通过但实际配置非法"的假阴性。
+    string configPath;
+    var explicitPathIdx = Array.FindIndex(args, a => a.Equals("--configPath", StringComparison.OrdinalIgnoreCase));
+    var contentRootIdx = Array.FindIndex(args, a => a.Equals("--contentRoot", StringComparison.OrdinalIgnoreCase));
+    if (explicitPathIdx >= 0 && explicitPathIdx + 1 < args.Length)
+    {
+        configPath = args[explicitPathIdx + 1];
+    }
+    else
+    {
+        var root = contentRootIdx >= 0 && contentRootIdx + 1 < args.Length
+            ? args[contentRootIdx + 1]
+            : AppContext.BaseDirectory;
+        configPath = Path.Combine(root, "appsettings.json");
+    }
     var ok = ConfigValidator.Validate(configPath, out var configError);
     Console.WriteLine(ok ? "Configuration OK" : $"Configuration error: {configError}");
     // 校验失败必须以非零退出码返回，否则 CI 预检步骤（--test-config）形同虚设。
@@ -25,7 +41,15 @@ if (args.Contains("--test-config") || args.Contains("-t"))
 var convertIdx = Array.FindIndex(args, a => a.Equals("--convert-nginx", StringComparison.OrdinalIgnoreCase));
 if (convertIdx >= 0)
 {
-    var inputPath = convertIdx + 1 < args.Length ? args[convertIdx + 1] : null;
+    // 兼容 "--convert-nginx -o out.json file.conf" 这类选项前置写法：跳过选项及其值再取位置参数。
+    string? inputPath = null;
+    for (var i = convertIdx + 1; i < args.Length; i++)
+    {
+        if (args[i].Equals("-o", StringComparison.OrdinalIgnoreCase)) { i++; continue; }
+        if (args[i].StartsWith('-')) continue;
+        inputPath = args[i];
+        break;
+    }
     var outIdx = Array.FindIndex(args, a => a.Equals("-o", StringComparison.OrdinalIgnoreCase));
     var outputPath = outIdx >= 0 && outIdx + 1 < args.Length ? args[outIdx + 1] : null;
     if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
@@ -90,7 +114,9 @@ builder.Services.AddGateway(builder.Configuration);
 // (2.1) 配置热重载：基于 NewLife.Core 的 JsonConfigProvider 监听 appsettings.json。
 //       校验委托复用 --test-config 的 ConfigValidator，保证热载配置与启动预检同标准；
 //       非法变更被闸门拦截并保留旧配置，服务不中断。
-var hotReloadConfigPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+// 必须与 YARP / IConfiguration 使用同一个 ContentRoot，
+// 否则 "--contentRoot" 启动时治理热重载仍监听发布目录里的另一份配置。
+var hotReloadConfigPath = Path.Combine(builder.Environment.ContentRootPath, "appsettings.json");
 builder.Services.AddGatewayHotReload(hotReloadConfigPath, path =>
 {
     var ok = ConfigValidator.Validate(path, out var error);
@@ -99,10 +125,19 @@ builder.Services.AddGatewayHotReload(hotReloadConfigPath, path =>
 
 var app = builder.Build();
 
+// 先保存原始连接 IP：管理端点必须用它做 localhost 判定，不能被 X-Forwarded-For 污染。
+app.Use(async (context, next) =>
+{
+    context.Items[AdminStatusMiddleware.OriginalRemoteIpItemsKey] = context.Connection.RemoteIpAddress;
+    await next();
+});
+
 // 在 IIS / 前置代理后正确还原客户端真实 IP 与协议（对应 nginx 的 set_real_ip / X-Forwarded-*）。
+// 默认信任列表只有 ::1；同机 IIS ANCM 走 127.0.0.1，不显式加入会导致 IP 黑白名单与 per-IP 限流失效。
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
-    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost,
+    KnownProxies = { IPAddress.IPv6Loopback, IPAddress.Loopback }
 });
 
 // (2.3) 请求链路 ID（X-Request-ID）：最外层生成/透传 ID，贯穿 proxy log / access log / XTrace。
@@ -113,6 +148,27 @@ app.UseGatewayAccessLog();
 
 // (2.5) 监控指标（最外层）：/metrics 与 /health 短路返回，并统计全部请求。
 app.UseGatewayMetrics();
+
+// (2.55) 全局异常兜底：统一记录异常并返回 JSON 500，避免 Kestrel 裸 500；
+// 放在 Metrics 之内，外层指标中间件仍能看到最终 500 状态码。
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        GatewayLogger.Error($"未处理异常：{context.Request.Method} {context.Request.Path}", ex);
+        if (!context.Response.HasStarted)
+        {
+            context.Response.Clear();
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Internal Server Error\"}");
+        }
+    }
+});
 
 // (2.6) 轻量管理端点：/admin/status 返回运行状态 JSON 摘要。
 app.UseGatewayAdmin();

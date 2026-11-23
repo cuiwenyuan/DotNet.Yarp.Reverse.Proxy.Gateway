@@ -5,38 +5,56 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 
 /// <summary>
 /// 限流共享状态（单例）：持有全局令牌桶与 per-IP 分桶，并支持运行时热更新配置。
-/// 中间件每次请求经 Acquire 获取令牌并输出 X-Rate-Limit-* 响应头数据；
-/// 管理端点热重载时调用 ApplyOptions 重建限流器（桶参数变更后旧 IP 桶清空重建）。
-/// 纯 BCL 实现。
+/// 配置 + 全局桶打包为不可变代快照，一次 Volatile.Write 发布，请求线程一次读取整代，
+/// 避免"新配置 + 旧令牌桶"跨代组合。纯 BCL 实现。
 /// </summary>
 public sealed class RateLimitState
 {
     private readonly object _gate = new();
     private readonly ConcurrentDictionary<string, IpBucket> _buckets = new();
 
-    /// <summary>按 IP 分桶的条目：令牌桶 + 最近访问时间（用于惰性回收）。</summary>
+    /// <summary>按 IP 分桶的条目：令牌桶 + 最近访问时间（用于空闲回收）。</summary>
     private sealed class IpBucket
     {
+        private long _lastAccessTicks;
+
+        public IpBucket(SimpleRateLimiter limiter, long ticks)
+        {
+            Limiter = limiter;
+            _lastAccessTicks = ticks;
+        }
+
         public SimpleRateLimiter Limiter { get; }
-        public long LastAccessTicks { get; set; }
-
-        public IpBucket(SimpleRateLimiter limiter, long ticks) => (Limiter, LastAccessTicks) = (limiter, ticks);
+        public long LastAccessTicks
+        {
+            get => Volatile.Read(ref _lastAccessTicks);
+            set => Volatile.Write(ref _lastAccessTicks, value);
+        }
     }
 
-    private RateLimitOptions _options;
-    private SimpleRateLimiter _global;
-
-    public RateLimitState(RateLimitOptions options)
+    /// <summary>一代完整限流配置：选项与由它构造的全局令牌桶必须配套。</summary>
+    private sealed class Generation
     {
-        _options = options;
-        _global = CreateLimiter(options);
+        public readonly RateLimitOptions Options;
+        public readonly SimpleRateLimiter Global;
+
+        public Generation(RateLimitOptions options)
+        {
+            Options = options;
+            Global = CreateLimiter(options);
+        }
     }
+
+    private Generation _generation;
+    private long _lastEvictTicks = DateTime.UtcNow.Ticks;
+
+    public RateLimitState(RateLimitOptions options) => _generation = new Generation(options);
 
     /// <summary>当前每分钟配额（用于 X-Rate-Limit-Limit 头）。</summary>
-    public int PerMinute => _options.PerMinute;
+    public int PerMinute => Volatile.Read(ref _generation).Options.PerMinute;
 
-    /// <summary>当前生效的限流配置（热重载后为最新值）。</summary>
-    public RateLimitOptions Options => _options;
+    /// <summary>当前生效的限流配置（热重载后为最新代）。</summary>
+    public RateLimitOptions Options => Volatile.Read(ref _generation).Options;
 
     /// <summary>
     /// 尝试获取令牌；返回是否放行与限流头数据。
@@ -44,44 +62,52 @@ public sealed class RateLimitState
     /// </summary>
     public SimpleRateLimiter.RateLimitInfo Acquire(string? ip)
     {
-        var options = _options;
+        // 一次读取整代快照：后续 PerIp / MaxIpBuckets / 全局桶都来自同一代配置。
+        var generation = Volatile.Read(ref _generation);
+        var options = generation.Options;
+
         if (options.PerIp && !string.IsNullOrEmpty(ip))
         {
             var now = DateTime.UtcNow.Ticks;
-            if (_buckets.Count < options.MaxIpBuckets)
+            if (!_buckets.TryGetValue(ip, out var bucket))
             {
-                var bucket = _buckets.GetOrAdd(ip,
-                    _ => new IpBucket(CreateLimiter(options), now));
-                bucket.LastAccessTicks = now;
-                return bucket.Limiter.TryAcquireDetailed();
+                // 只对"新 IP"触发回收，且回收按 1 分钟节流，避免满桶后每请求 O(n) 全表扫描。
+                TryEvictIdleBuckets(options, now);
+                if (_buckets.Count < options.MaxIpBuckets)
+                {
+                    bucket = _buckets.GetOrAdd(ip, _ => new IpBucket(CreateLimiter(options), now));
+                }
             }
 
-            TryEvictIdleBuckets(options, now);
-            if (_buckets.Count < options.MaxIpBuckets)
+            if (bucket is not null)
             {
-                var bucket = _buckets.GetOrAdd(ip,
-                    _ => new IpBucket(CreateLimiter(options), now));
                 bucket.LastAccessTicks = now;
                 return bucket.Limiter.TryAcquireDetailed();
             }
         }
 
-        return _global.TryAcquireDetailed();
+        return generation.Global.TryAcquireDetailed();
     }
 
-    /// <summary>热重载：替换配置并重建限流器（清空 IP 桶使其按新参数重建）。</summary>
+    /// <summary>热重载：构造新代（新配置 + 新全局桶）后原子发布，并清空按 IP 分桶按新参数重建。</summary>
     public void ApplyOptions(RateLimitOptions options)
     {
+        var next = new Generation(options);
         lock (_gate)
         {
-            _options = options;
-            _global = CreateLimiter(options);
+            Volatile.Write(ref _generation, next);
             _buckets.Clear();
         }
     }
 
+    /// <summary>回收空闲 IP 桶；每分钟最多真正扫描一次。</summary>
     private void TryEvictIdleBuckets(RateLimitOptions options, long now)
     {
+        const long scanIntervalTicks = TimeSpan.TicksPerMinute;
+        var last = Interlocked.Read(ref _lastEvictTicks);
+        if (now - last < scanIntervalTicks) return;
+        if (Interlocked.CompareExchange(ref _lastEvictTicks, now, last) != last) return;
+
         var idleThresholdTicks = TimeSpan.FromMinutes(Math.Max(1, options.BucketIdleMinutes)).Ticks;
         foreach (var kv in _buckets)
         {

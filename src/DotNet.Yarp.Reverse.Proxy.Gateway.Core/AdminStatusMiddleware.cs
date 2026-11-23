@@ -14,6 +14,13 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 /// </summary>
 public class AdminStatusMiddleware
 {
+    /// <summary>
+    /// Program.cs 在 UseForwardedHeaders 之前保存的原始连接 IP。
+    /// localhost 判定必须读它，不能读被 X-Forwarded-For 改写过的 RemoteIpAddress，
+    /// 否则远端客户端可伪造 XFF 绕过 /admin/reload 的回环限制。
+    /// </summary>
+    public const string OriginalRemoteIpItemsKey = "__GatewayOriginalRemoteIp";
+
     private static readonly DateTime StartedAtUtc = DateTime.UtcNow;
     private static readonly string AssemblyVersion =
         Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
@@ -52,8 +59,9 @@ public class AdminStatusMiddleware
             return;
         }
 
-        // POST /admin/reload：配置热重载（仅 localhost）
-        if (HttpMethods.IsPost(context.Request.Method)
+        // POST /admin/reload：配置热重载（需 ReloadEnabled 开启，且仅 localhost）
+        if (_options.ReloadEnabled
+            && HttpMethods.IsPost(context.Request.Method)
             && context.Request.Path.Equals(_options.ReloadPath, StringComparison.OrdinalIgnoreCase))
         {
             await HandleReloadAsync(context);
@@ -75,6 +83,8 @@ public class AdminStatusMiddleware
     {
         var snapshot = _metrics.GetSnapshot();
         var governance = _metrics.GetGovernanceSnapshot();
+        // 远端请求只看摘要：错误详情可能包含后端地址，分桶名可能暴露内部路径。
+        var isLocal = IsLocalRequest(context);
         var payload = new
         {
             app = "DotNet.Yarp.Reverse.Proxy.Gateway",
@@ -90,7 +100,7 @@ public class AdminStatusMiddleware
                 reloadCount = _hotReload.ReloadCount,
                 lastReloadAt = _hotReload.LastReloadAtUtc?.ToString("o"),
                 lastAttemptAt = _hotReload.LastAttemptAtUtc?.ToString("o"),
-                lastError = _hotReload.LastError
+                lastError = isLocal ? _hotReload.LastError : null
             },
             metrics = new
             {
@@ -128,7 +138,7 @@ public class AdminStatusMiddleware
                     rejected = governance.CircuitRejected,
                     failures = governance.CircuitFailures,
                     successes = governance.CircuitSuccesses,
-                    states = _circuitRegistry?.Snapshot()
+                    states = isLocal ? _circuitRegistry?.Snapshot() : null
                 },
                 cache = new
                 {
@@ -154,9 +164,8 @@ public class AdminStatusMiddleware
 
     private async Task HandleReloadAsync(HttpContext context)
     {
-        // 仅允许本机回环地址（127.0.0.1 / ::1）触发重载，防止远程篡改配置
-        var remoteIp = context.Connection.RemoteIpAddress;
-        if (remoteIp is null || !IPAddress.IsLoopback(remoteIp))
+        // 仅允许真正的本机回环地址（127.0.0.1 / ::1）触发重载，防止 XFF 伪造绕过。
+        if (!IsLocalRequest(context))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied: only localhost allowed.");
@@ -185,6 +194,21 @@ public class AdminStatusMiddleware
         context.Response.StatusCode = ok ? StatusCodes.Status200OK : StatusCodes.Status500InternalServerError;
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonOptions));
+    }
+
+    /// <summary>
+    /// 回环判定优先使用 UseForwardedHeaders 之前保存的原始连接 IP；
+    /// 没有该项时（例如单测直接构造 HttpContext）退回 Connection.RemoteIpAddress。
+    /// </summary>
+    private static bool IsLocalRequest(HttpContext context)
+    {
+        IPAddress? ip = null;
+        if (context.Items.TryGetValue(OriginalRemoteIpItemsKey, out var saved) && saved is IPAddress savedIp)
+        {
+            ip = savedIp;
+        }
+        ip ??= context.Connection.RemoteIpAddress;
+        return ip is not null && IPAddress.IsLoopback(ip);
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()

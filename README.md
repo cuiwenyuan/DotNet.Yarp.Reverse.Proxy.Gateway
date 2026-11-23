@@ -193,12 +193,14 @@ cd DotNet.Yarp.Reverse.Proxy.Gateway
 # 2) 还原并构建（三目标框架，Release）
 dotnet build -c Release
 
-# 2.0) 治理指标单元测试（零 NuGet 测试程序，8 项断言，退出码 0 = 通过）
+# 2.0) 治理指标单元测试（零 NuGet 测试程序，14 项断言，退出码 0 = 通过）
 dotnet run --project tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests -c Release --no-build
 
-# 2.1) 配置预检（可选，等价 nginx -t）：校验路由/集群唯一性与后端地址合法性
+# 2.1) 配置预检（可选，等价 nginx -t）：校验路由/集群唯一性、ClusterId 引用、YARP cluster/transforms 与治理数值
 dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o publish
 dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # 输出 Configuration OK
+# 校验指定目录的配置（与运行时 --contentRoot 保持一致）：
+dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config --contentRoot ./publish
 
 # 3) 启动网关（Kestrel 默认监听 http://localhost:5000）
 dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
@@ -439,6 +441,8 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | `ConcurrencyLimit:MaxWaitMs` | `1000` | 排队模式最长等待毫秒数，超时返回 `StatusCode` |
 | `ConcurrencyLimit:StatusCode` | `503` | 并发超限时的 HTTP 状态码（对齐 nginx `limit_conn` 默认行为），并回写 `Retry-After: 1` 与 `X-Concurrency-Limit` 头 |
 
+**运行期鲁棒性**：默认信任本机 `127.0.0.1` / `::1` 的 `X-Forwarded-*`，使 IIS ANCM 后的 IP 黑白名单与 per-IP 限流能还原真实客户端；未处理异常统一记录并返回 JSON 500（响应已开始时不改写）；ProxyLogging / Retry / ResponseCache 对已知超过 8MB 的响应不做全量缓冲，缓存元数据与响应体存于同一条目并在满额时回收过期项。
+
 #### 治理指标（`/metrics`）
 
 除基础流量指标外，`/metrics` 以 Prometheus 文本格式暴露以下治理指标（零第三方 NuGet，纯 `Interlocked` 原子计数）：
@@ -452,7 +456,9 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | 重试 | `gateway_retry_requests_total` / `gateway_retry_attempts_total` / `gateway_retry_exhausted_total` / `gateway_retry_failed_total` | 有资格重试的请求、额外尝试次数、预算耗尽、最终失败 |
 | 路径分布 | `gateway_requests_by_path{path="..."}` | 仅在 `Metrics:IncludePathLabels=true` 时输出，按路径首段聚合，注意基数 |
 
-`/admin/status` 同步增加 `governance` 节点（限流/并发/熔断/缓存/重试计数与各熔断分桶状态），便于不接 Prometheus 时快速排障。
+基础流量指标为 `gateway_requests_total`、`gateway_requests_inflight`、`gateway_request_duration_ms_total`、`gateway_request_duration_ms_max`（counter 以 `_total` 结尾，符合 Prometheus 规范）。熔断分桶有硬上限 512，超限路径归入 `__overflow__` 桶并按 30 分钟空闲回收，避免任意 URL 前缀导致无界增长。
+
+`/admin/status` 同步增加 `governance` 节点（限流/并发/熔断/缓存/重试计数与各熔断分桶状态），便于不接 Prometheus 时快速排障；非本机请求只返回摘要，`lastError` 与分桶名会脱敏。
 
 ### 8.3 配置热重载（等价 nginx -s reload）
 
@@ -462,11 +468,12 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 | --- | --- |
 | 变更感知 | `JsonConfigProvider`（FileSystemWatcher 事件驱动，≤1s）+ 定时轮询兜底（~40s，覆盖原子替换 / 网络盘 / watcher 失效） |
 | 原地映射 | `ConfigHelper.MapTo` 把新配置原地写入已注入的 Options 单例（含嵌套对象与数组），持有引用的中间件零改动即见新值 |
+| 原子发布 | 有派生状态的组件（限流/IP 过滤/并发/熔断）改为接收**不可变配置快照**，一次 `Volatile.Write` 发布；请求线程一次 `Volatile.Read` 取同一代，杜绝"新开关 + 旧规则"跨代组合 |
 | 派生状态重建 | 限流令牌桶、IP 黑白名单 CIDR 规则集经 `Changed` 回调调 `ApplyOptions` 重建；并发上限只换配置引用、**不清零在途计数**（避免重载瞬间放宽配额）；熔断注册表同步新配置但保留当前状态 |
-| 校验闸门 | 应用前先跑与 `--test-config` 相同的 `ConfigValidator`（含 YARP 路由 transforms 校验）；非法配置被拦截、保留上一份有效配置、记录 `lastError`，服务不中断 |
+| 校验闸门 | 应用前先跑与 `--test-config` 相同的 `ConfigValidator`（含 YARP cluster/transforms 校验）；校验前后比对配置内容 SHA-256，文件在校验期间变化则放弃本次；同一指纹只应用一次，避免 watcher 与轮询重复清空令牌桶。非法配置被拦截、保留旧配置、记录 `lastError`，服务不中断 |
 
 - **路由/集群**（`ReverseProxy`）仍由 YARP 的 `IConfiguration` reloadOnChange 热加载，行为不变。
-- **手动兜底**：`POST /admin/reload`（仅 localhost）强制从磁盘重载，走同一套校验闸门；文件监听失效时可用。
+- **手动兜底**：`POST /admin/reload`（需 `Admin:ReloadEnabled=true`，仅真实回环来源）强制从磁盘重载，走同一套校验闸门；文件监听失效时可用。localhost 判定取 `UseForwardedHeaders` 之前保存的原始连接 IP，伪造 `X-Forwarded-For` 无法绕过。
 - **可观测**：`GET /admin/status` 的 `hotReload` 节点返回 `reloadCount` / `lastReloadAt` / `lastAttemptAt` / `lastError`。
 - **注意**：用"原子替换"方式写文件（如 `sed -i`、部分工具的"先删后写"）会破坏 watcher 句柄，此时依赖 ~40s 定时轮询兜底；用编辑器常规保存（原地写入）可 ≤1s 生效。
 

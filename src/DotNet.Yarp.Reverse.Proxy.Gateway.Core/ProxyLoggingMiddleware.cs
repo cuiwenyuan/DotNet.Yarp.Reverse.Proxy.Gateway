@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
@@ -23,6 +24,10 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 /// </summary>
 public class ProxyLoggingMiddleware
 {
+    // 响应体接管的硬闸门：已知超过 8MB 的响应只记录元数据，不做全量缓冲，
+    // 避免与 Retry / Cache 形成三层 MemoryStream 导致内存放大与下载延迟。
+    private const long MaxLogResponseBytes = 8 * 1024 * 1024;
+
     private readonly RequestDelegate _next;
     private readonly ProxyLoggingOptions _options;
 
@@ -76,7 +81,10 @@ public class ProxyLoggingMiddleware
         }
 
         // ---- 是否接管响应体 ----
-        var wrapResponse = _options.LogResponseBody && !isUpgrade;
+        // 已知的大响应（Content-Length 超过闸门）直接透传，避免高内存与流式响应被破坏。
+        var contentLength = context.Response.ContentLength;
+        var wrapResponse = _options.LogResponseBody && !isUpgrade
+            && (!contentLength.HasValue || contentLength.Value <= MaxLogResponseBytes);
         var respBody = string.Empty;
         var originalBody = context.Response.Body;
 
@@ -181,10 +189,13 @@ public class ProxyLoggingMiddleware
     private static bool IsLoggableBody(string? contentType)
     {
         if (string.IsNullOrEmpty(contentType)) return false;
-        var ct = contentType.ToLowerInvariant();
-        return ct.Contains("json") || ct.Contains("xml") || ct.Contains("text") ||
-               ct.Contains("x-www-form-urlencoded") || ct.Contains("javascript") ||
-               ct.Contains("html");
+        // 无分配的忽略大小写匹配，避免每请求一次 ToLowerInvariant 分配。
+        return contentType.Contains("json", StringComparison.OrdinalIgnoreCase)
+            || contentType.Contains("xml", StringComparison.OrdinalIgnoreCase)
+            || contentType.Contains("text", StringComparison.OrdinalIgnoreCase)
+            || contentType.Contains("x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase)
+            || contentType.Contains("javascript", StringComparison.OrdinalIgnoreCase)
+            || contentType.Contains("html", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>是否预缓冲请求体（无规则=全部；有规则=仅路径命中 PathContains 才缓冲）。</summary>
@@ -228,13 +239,22 @@ public class ProxyLoggingMiddleware
     private static async Task<string> ReadBodyAsync(Stream stream, int maxBytes)
     {
         if (stream.CanSeek) stream.Position = 0;
-        var buffer = new byte[maxBytes];
-        var total = 0;
-        int read;
-        while (total < maxBytes && (read = await stream.ReadAsync(buffer, total, maxBytes - total)) > 0)
+        var limit = Math.Max(1, maxBytes);
+        // 用 ArrayPool 复用缓冲，避免每请求分配一份 64KB 数组。
+        var buffer = ArrayPool<byte>.Shared.Rent(limit);
+        try
         {
-            total += read;
+            var total = 0;
+            int read;
+            while (total < limit && (read = await stream.ReadAsync(buffer.AsMemory(total, limit - total))) > 0)
+            {
+                total += read;
+            }
+            return Encoding.UTF8.GetString(buffer, 0, total);
         }
-        return Encoding.UTF8.GetString(buffer, 0, total);
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 }

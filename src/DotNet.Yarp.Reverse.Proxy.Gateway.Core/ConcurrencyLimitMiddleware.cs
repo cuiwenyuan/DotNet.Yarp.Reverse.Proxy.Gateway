@@ -10,8 +10,8 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 /// 后端响应变慢时，令牌桶仍可能放行，而并发上限会把堆积挡在入口，是后端承压的最后一道保险。
 ///
 /// 纯 BCL（Interlocked/Volatile）实现，线程安全、无锁、零第三方 NuGet。
-/// 热重载：ApplyOptions 只替换配置引用，不重置计数器——正在飞行的请求持有的槽位不会被"吞掉"，
-/// 避免重载瞬间计数错乱导致提前放行超额请求。
+/// 热重载：ApplyOptions 只替换配置引用，不重置计数器——正在飞行的请求持有的槽位不会被"吞掉"。
+/// 请求的启用判断与占槽必须使用同一代配置快照，否则 Enabled 翻转会造成槽位误归还。
 /// </summary>
 public sealed class ConcurrencyLimitState
 {
@@ -22,8 +22,8 @@ public sealed class ConcurrencyLimitState
 
     public ConcurrencyLimitState(ConcurrencyLimitOptions options) => _options = options;
 
-    /// <summary>当前生效配置（热重载后为同一对象引用上的新值）。</summary>
-    public ConcurrencyLimitOptions Options => _options;
+    /// <summary>当前生效配置（每次热重载原子发布一份新引用）。</summary>
+    public ConcurrencyLimitOptions Options => Volatile.Read(ref _options);
 
     /// <summary>当前在途请求数。</summary>
     public int InFlight => Volatile.Read(ref _inFlight);
@@ -40,22 +40,24 @@ public sealed class ConcurrencyLimitState
     /// <summary>热重载：替换配置引用。不重置计数器，保护在途请求的槽位。</summary>
     public void ApplyOptions(ConcurrencyLimitOptions options) => Volatile.Write(ref _options, options);
 
-    /// <summary>
-    /// 尝试占用一个并发槽位。CAS 循环保证不会超过上限（并发下不会超卖）。
-    /// 上限变化时即时生效：读取的是最新 Options.MaxConcurrent。
-    /// </summary>
-    public bool TryAcquire()
-    {
-        if (!_options.Enabled) return true; // 未启用时不占槽位、不计数
+    /// <summary>尝试占用一个并发槽位，使用当前配置快照。</summary>
+    public bool TryAcquire() => TryAcquire(Options);
 
-        var max = Math.Max(1, _options.MaxConcurrent);
+    /// <summary>
+    /// 尝试占用一个并发槽位。必须传入调用方本次请求已读取的配置快照，
+    /// 保证"是否启用"与"上限值"来自同一代配置，且只有真正占槽成功才返回 true。
+    /// CAS 循环保证并发下不会超过上限（不会超卖）。
+    /// </summary>
+    public bool TryAcquire(ConcurrencyLimitOptions options)
+    {
+        if (!options.Enabled) return false; // 未启用不占槽；由中间件在入口直接放行
+
+        var max = Math.Max(1, options.MaxConcurrent);
         while (true)
         {
             var current = Volatile.Read(ref _inFlight);
-            if (current >= max)
-            {
-                return false;
-            }
+            if (current >= max) return false;
+
             if (Interlocked.CompareExchange(ref _inFlight, current + 1, current) == current)
             {
                 // 更新峰值（只增不减，CAS 避免并发写丢失）
@@ -109,6 +111,7 @@ public class ConcurrencyLimitMiddleware
 
     public async Task Invoke(HttpContext context)
     {
+        // 整段只使用这一代配置快照：热重载不会让"判断启用"与"占槽/归还"跨代错位。
         var options = _state.Options;
         if (!options.Enabled)
         {
@@ -117,7 +120,7 @@ public class ConcurrencyLimitMiddleware
         }
 
         var waitStartedAt = Environment.TickCount64;
-        var acquired = _state.TryAcquire();
+        var acquired = _state.TryAcquire(options);
         if (!acquired && options.WaitEnabled)
         {
             // 平滑模式：轮询等空位，最多 MaxWaitMs。用 10ms 粒度避免忙等。
@@ -125,7 +128,7 @@ public class ConcurrencyLimitMiddleware
             while (!acquired && Environment.TickCount64 < deadline)
             {
                 await Task.Delay(Math.Min(10, Math.Max(1, (int)(deadline - Environment.TickCount64))));
-                acquired = _state.TryAcquire();
+                acquired = _state.TryAcquire(options);
             }
         }
 
@@ -152,7 +155,7 @@ public class ConcurrencyLimitMiddleware
         }
         finally
         {
-            // 关键：任何路径（含下游异常、客户端断连）都必须归还槽位，否则会永久泄漏配额。
+            // 关键：只有真正占到了槽位才归还；任何路径（含下游异常、客户端断连）都必须归还。
             _state.Release();
         }
     }

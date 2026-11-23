@@ -27,7 +27,7 @@ public class LocationRewriteMiddleware
         // 必须先 await，让 YARP/后端产生响应（含 3xx 的 Location），再在回程改写。
         await _next(context);
 
-        if (!_options.Enabled) return;
+        if (!_options.Enabled || context.Response.HasStarted) return;
 
         var location = context.Response.Headers.Location.ToString();
         if (string.IsNullOrEmpty(location)) return;

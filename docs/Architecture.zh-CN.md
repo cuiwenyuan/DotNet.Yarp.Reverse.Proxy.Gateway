@@ -159,20 +159,26 @@ appsettings.json ──(编辑保存)──▶ JsonConfigProvider（Watcher ≤1
                                   │  IConfigProvider.Changed
                                   ▼
                      GatewayHotReload.ReloadCore()
-                        ① ConfigValidator 校验闸门（失败→保留旧配置+lastError）
-                        ② ConfigHelper.MapTo 原地映射 → 全部 Gateway Options 单例
-                        ③ 派生状态重建 → RateLimitState / IpFilterState / ConcurrencyLimitState / CircuitBreakerRegistry.ApplyOptions()
+                        ① 强制 LoadAll + ConfigValidator 校验闸门（失败→保留旧配置+lastError）
+                        ② SHA-256 指纹复核（校验期间文件变化→放弃）+ 同指纹去重
+                        ③ ConfigHelper.MapTo 原地映射 → 兼容直接注入裸 options 的中间件
+                        ④ 不可变配置快照一次 Volatile.Write 发布 → RateLimitState /
+                           IpFilterState / ConcurrencyLimitState / CircuitBreakerRegistry.ApplyOptions()
 
-                     POST /admin/reload（仅 localhost）──▶ 同一套 ReloadCore（手动兜底）
+                     POST /admin/reload（需 ReloadEnabled + 真实回环来源）──▶ 同一套 ReloadCore
 ```
 
 - **原地映射**：`ConfigHelper.MapTo` 把新配置写入已注入的 Options 单例（嵌套对象与数组均保持
-  对象引用），所有治理中间件零改动即见新值——不再需要"只注入 state 不注入 options"。
+  对象引用），兼容尚未改造为快照读取的中间件（CORS / 安全头等）。
+- **原子发布**：有派生状态的组件接收全新的不可变 options 快照，一次 `Volatile.Write` 发布；
+  请求线程一次 `Volatile.Read` 取同一代，杜绝"新开关 + 旧规则"跨代组合。
 - **派生状态**：`RateLimitState`（每 IP 令牌桶）、`IpFilterState`（CIDR 列表）经
-  `ApplyOptions` 原地重建，下一次请求即用新规则；`ConcurrencyLimitState` 只换配置引用、
+  `ApplyOptions` 重建，下一次请求即用新规则；`ConcurrencyLimitState` 只换配置引用、
   不清零在途槽位；`CircuitBreakerRegistry` 同步新配置但保留各分桶当前状态，指标曲线不会因重载断档。
-- **校验闸门**：应用前跑与 `--test-config` 相同的 `ConfigValidator`，非法配置被拦截、
-  保留上一份有效配置并记 `lastError`，服务不中断（见 §6 容错）。
+- **校验闸门**：应用前跑与 `--test-config` 相同的 `ConfigValidator`（含 YARP cluster/transform），
+  非法配置被拦截、保留上一份有效配置并记 `lastError`，服务不中断（见 §6 容错）。
+- **去重与同源**：watcher 与轮询会对同一次保存各触发一次 `Changed`；用配置内容 SHA-256
+  作为版本标识，同版本只应用一次，避免重复清空令牌桶；校验前后比对指纹，防止"校验 A、应用 B"。
 - **双机制感知**：FileSystemWatcher 事件驱动（≤1s）+ 定时轮询兜底（~40s，覆盖原子替换/
   网络盘/watcher 失效）。代码仅依赖 NewLife.Core + BCL，不破坏"两包"约束。
 

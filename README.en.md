@@ -212,12 +212,14 @@ cd DotNet.Yarp.Reverse.Proxy.Gateway
 # 2) Restore and build (multi-targeting, Release)
 dotnet build -c Release
 
-# 2.0) Governance-metrics unit tests (zero-NuGet harness, 8 checks, exit code 0 = pass)
+# 2.0) Governance-metrics unit tests (zero-NuGet harness, 14 checks, exit code 0 = pass)
 dotnet run --project tests/DotNet.Yarp.Reverse.Proxy.Gateway.Tests -c Release --no-build
 
-# 2.1) Config precheck (optional, like `nginx -t`): validates route/cluster uniqueness and backend addresses
+# 2.1) Config precheck (like `nginx -t`): uniqueness, ClusterId references, YARP cluster/transforms and numeric settings
 dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o publish
 dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config   # prints Configuration OK
+# Validate a specific directory (match the runtime --contentRoot):
+dotnet ./publish/DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll --test-config --contentRoot ./publish
 
 # 3) Run the gateway (Kestrel listens on http://localhost:5000 by default)
 dotnet run --project src/DotNet.Yarp.Reverse.Proxy.Gateway.Web
@@ -461,6 +463,8 @@ Example:
 | `ConcurrencyLimit:MaxWaitMs` | `1000` | Max queue wait in ms; on timeout returns `StatusCode` |
 | `ConcurrencyLimit:StatusCode` | `503` | HTTP status on concurrency overflow (matches nginx `limit_conn` default), also writes `Retry-After: 1` and `X-Concurrency-Limit` headers |
 
+**Runtime robustness**: the loopback addresses `127.0.0.1` and `::1` are trusted for `X-Forwarded-*`, so IP filtering and per-IP rate limiting see the real client behind IIS ANCM. Unhandled exceptions are logged and returned as JSON 500 (an already-started response is left untouched). ProxyLogging / Retry / ResponseCache skip full buffering for known responses above 8 MB; cache metadata and body share one entry, and expired entries are reclaimed when the cache is full.
+
 #### Governance metrics (`/metrics`)
 
 In addition to baseline traffic metrics, `/metrics` exposes the following governance metrics in
@@ -475,8 +479,15 @@ Prometheus text format (pure BCL `Interlocked` counters, no third-party NuGet):
 | Retry | `gateway_retry_requests_total` / `gateway_retry_attempts_total` / `gateway_retry_exhausted_total` / `gateway_retry_failed_total` | Retry-eligible requests, extra attempts, exhausted budgets, final failures |
 | Path distribution | `gateway_requests_by_path{path="..."}` | Emitted only when `Metrics:IncludePathLabels=true`; grouped by first path segment (watch cardinality) |
 
+Baseline traffic metrics are `gateway_requests_total`, `gateway_requests_inflight`,
+`gateway_request_duration_ms_total`, and `gateway_request_duration_ms_max` (counters end in
+`_total`, per Prometheus conventions). Circuit-breaker buckets are capped at 512; overflow keys
+share the `__overflow__` bucket and idle buckets are reclaimed after 30 minutes, so arbitrary URL
+prefixes cannot grow memory without bound.
+
 `/admin/status` also includes a `governance` node with the same counters and per-bucket breaker
-states, so you can troubleshoot quickly without a Prometheus stack.
+states, so you can troubleshoot quickly without a Prometheus stack. Non-local callers only see a
+redacted summary (`lastError` and bucket names are omitted).
 
 ### 8.3 Configuration hot reload (equivalent to nginx -s reload)
 
@@ -486,11 +497,12 @@ Edit and save `appsettings.json` and **all `Gateway` governance settings take ef
 | --- | --- |
 | Change detection | `JsonConfigProvider` (FileSystemWatcher events, ≤1s) + periodic polling fallback (~40s, covers atomic replacement / network drives / watcher failure) |
 | In-place mapping | `ConfigHelper.MapTo` writes new values into the already-injected Options singletons (including nested objects and arrays); middleware holding the references sees new values with zero code changes |
+| Atomic publish | Components with derived state (rate limit / IP filter / concurrency / circuit breaker) receive **immutable config snapshots** published via a single `Volatile.Write`; request threads take one `Volatile.Read`, so "new switch + old rules" combinations cannot occur |
 | Derived-state rebuild | Rate-limit token bucket and IP CIDR rules are rebuilt via `ApplyOptions` in the `Changed` callback; the concurrency cap only swaps the config reference and **does not reset the in-flight counter** (avoids momentarily relaxing the cap during reload); the circuit-breaker registry receives the new config while keeping current breaker states |
-| Validation gate | Before applying, the same `ConfigValidator` as `--test-config` runs (including YARP route transform validation); invalid config is rejected, the last valid config is kept, `lastError` is recorded, and the service stays up |
+| Validation gate | Before applying, the same `ConfigValidator` as `--test-config` runs (including YARP cluster/transform validation). A SHA-256 fingerprint is compared before and after validation — if the file changed meanwhile, that attempt is discarded; an identical fingerprint is applied only once, so watcher and polling callbacks cannot double-clear token buckets. Invalid config is rejected and the old config is kept |
 
 - **Routes / clusters** (`ReverseProxy`) keep using YARP's `IConfiguration` reloadOnChange — behavior unchanged.
-- **Manual fallback**: `POST /admin/reload` (localhost only) forces a disk reload through the same validation gate; usable when file watching fails.
+- **Manual fallback**: `POST /admin/reload` (requires `Admin:ReloadEnabled=true`, real loopback source only) forces a disk reload through the same validation gate. The localhost check uses the original connection IP saved before `UseForwardedHeaders`, so a forged `X-Forwarded-For` cannot bypass it.
 - **Observability**: `GET /admin/status` returns a `hotReload` node with `reloadCount` / `lastReloadAt` / `lastAttemptAt` / `lastError`.
 - **Note**: atomic file replacement (e.g. `sed -i`, "delete-then-write" tools) breaks the watcher handle; in that case the ~40s polling fallback applies. Normal editor saves (in-place writes) take effect in ≤1s.
 

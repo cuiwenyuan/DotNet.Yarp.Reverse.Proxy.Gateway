@@ -172,24 +172,31 @@ appsettings.json ──(edit/save)──▶ JsonConfigProvider (Watcher ≤1s / 
                                   │  IConfigProvider.Changed
                                   ▼
                      GatewayHotReload.ReloadCore()
-                        ① ConfigValidator gate (fail → keep old config + lastError)
-                        ② ConfigHelper.MapTo in-place → all Gateway Options singletons
-                        ③ Derived-state rebuild → RateLimitState / IpFilterState / ConcurrencyLimitState / CircuitBreakerRegistry.ApplyOptions()
+                        ① Forced LoadAll + ConfigValidator gate (fail → keep old config + lastError)
+                        ② SHA-256 fingerprint recheck (file changed during validation → discard) + de-dup
+                        ③ ConfigHelper.MapTo in-place → compatibility for middleware injecting raw options
+                        ④ Immutable snapshot published via one Volatile.Write → RateLimitState /
+                           IpFilterState / ConcurrencyLimitState / CircuitBreakerRegistry.ApplyOptions()
 
-                     POST /admin/reload (localhost only) ──▶ same ReloadCore (manual fallback)
+                     POST /admin/reload (ReloadEnabled + real loopback) ──▶ same ReloadCore
 ```
 
 - **In-place mapping**: `ConfigHelper.MapTo` writes new values into the already-injected Options
-  singletons (nested objects and arrays keep their references), so every governance middleware sees
-  new values with zero code changes — no longer limited to "state-only injection".
+  singletons (nested objects and arrays keep their references), staying compatible with middleware
+  that still injects raw options (CORS / security headers, etc.).
+- **Atomic publish**: components with derived state receive a fresh immutable options snapshot and
+  publish it with a single `Volatile.Write`; request threads take one `Volatile.Read`, so a "new
+  switch + old rules" combination cannot occur.
 - **Derived state**: `RateLimitState` (per-IP token buckets) and `IpFilterState` (CIDR list) are
-  rebuilt in place via `ApplyOptions`; the next request uses the new rules, in-flight buckets are
-  not interrupted. `ConcurrencyLimitState` only swaps the config reference and never resets in-flight
-  slots; `CircuitBreakerRegistry` receives the new config while preserving each bucket's current state,
-  so metric curves do not break on reload.
-- **Validation gate**: the same `ConfigValidator` as `--test-config` runs before applying; invalid
-  config is rejected, the last valid config is kept, `lastError` recorded, and the service stays up
+  rebuilt via `ApplyOptions`; the next request uses the new rules. `ConcurrencyLimitState` only swaps
+  the config reference and never resets in-flight slots; `CircuitBreakerRegistry` receives the new
+  config while preserving each bucket's current state.
+- **Validation gate**: the same `ConfigValidator` as `--test-config` runs before applying (including
+  YARP cluster/transform validation). Invalid config is rejected and the last valid config is kept
   (see §6 resilience).
+- **De-duplication & single source**: watcher and polling both fire `Changed` for one save; the
+  config SHA-256 is used as a version key so an identical version is applied only once (no repeated
+  token-bucket clears), and is compared before/after validation to prevent "validate A, apply B".
 - **Dual detection**: FileSystemWatcher events (≤1s) + periodic polling fallback (~40s, covers
   atomic replacement / network drives / watcher failure). Uses only NewLife.Core + BCL, preserving
   the "two-package" constraint.

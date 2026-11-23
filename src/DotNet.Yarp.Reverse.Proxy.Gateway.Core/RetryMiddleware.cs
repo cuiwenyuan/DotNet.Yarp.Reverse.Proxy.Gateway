@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Microsoft.AspNetCore.Http;
 
 namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
@@ -12,6 +13,9 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 /// </summary>
 public class RetryMiddleware
 {
+    // 响应体缓冲上限：已知大响应直接跳过重试能力，避免全量缓冲造成内存放大。
+    private const long MaxBufferedResponseBytes = 8 * 1024 * 1024;
+
     private readonly RequestDelegate _next;
     private readonly RetryOptions _options;
     private readonly GatewayMetrics? _metrics;
@@ -25,9 +29,11 @@ public class RetryMiddleware
 
     public async Task Invoke(HttpContext context)
     {
+        var contentLength = context.Response.ContentLength;
         if (!_options.Enabled
             || !IsRetryableMethod(context.Request.Method)
-            || context.WebSockets.IsWebSocketRequest)
+            || context.WebSockets.IsWebSocketRequest
+            || (contentLength.HasValue && contentLength.Value > MaxBufferedResponseBytes))
         {
             await _next(context);
             return;
@@ -60,6 +66,9 @@ public class RetryMiddleware
                     ? _options.RetryOnConnectionError
                     : IsRetryableStatus(context.Response.StatusCode);
 
+                // 已缓冲内容超过上限则放弃重试，避免把同一大响应重复搬进内存。
+                if (buffer.Length > MaxBufferedResponseBytes) shouldRetry = false;
+
                 if (shouldRetry && attempt < _options.MaxRetries && TryResetResponse(context))
                 {
                     attempt++;
@@ -91,7 +100,8 @@ public class RetryMiddleware
         if (lastError is not null)
         {
             _metrics?.RecordRetryFailure();
-            throw lastError;
+            // 保留原始堆栈，避免 throw ex 重写 StackTrace 影响排障。
+            ExceptionDispatchInfo.Capture(lastError).Throw();
         }
     }
 

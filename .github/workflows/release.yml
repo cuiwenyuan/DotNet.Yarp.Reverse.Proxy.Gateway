@@ -47,8 +47,11 @@ jobs:
       - name: Config precheck (--test-config, equivalent to nginx -t)
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "$env:RUNNER_TEMP\precheck"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet "$env:RUNNER_TEMP\precheck\DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll" --test-config
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # ---------- Job 2：发版（依赖 Job 1 通过；tag 或手动触发均可） ----------
   release:

@@ -2,6 +2,7 @@ using DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Yarp.ReverseProxy.Configuration;
+using Yarp.ReverseProxy.LoadBalancing;
 
 namespace DotNet.Yarp.Reverse.Proxy.Gateway.Web;
 
@@ -23,6 +24,8 @@ public static class ConfigValidator
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddReverseProxy();
+        // 注册本项目自定义策略，否则配置 "Weighted" 会被 YARP 校验器误判为未知策略。
+        services.AddSingleton<ILoadBalancingPolicy, WeightedLoadBalancingPolicy>();
         return services.BuildServiceProvider().GetRequiredService<IConfigValidator>();
     });
 
@@ -52,6 +55,28 @@ public static class ConfigValidator
                 return false;
             }
 
+            // ConfigurationBinder 对非法数值会静默取默认值，必须显式校验关键项，
+            // 否则 "PerMinute": "abc" 这类错误会通过闸门并让运行时行为出乎意料。
+            (string Path, int Min)[] numericSettings =
+            {
+                ("Gateway:RateLimit:PerMinute", 1),
+                ("Gateway:RateLimit:MaxIpBuckets", 1),
+                ("Gateway:ConcurrencyLimit:MaxConcurrent", 1),
+                ("Gateway:Cache:MaxCacheEntries", 1),
+                ("Gateway:Retry:MaxRetries", 0),
+                ("Gateway:CircuitBreaker:FailureThreshold", 1)
+            };
+            foreach (var (path, min) in numericSettings)
+            {
+                var raw = config[path];
+                if (string.IsNullOrEmpty(raw)) continue;
+                if (!int.TryParse(raw, out var number) || number < min)
+                {
+                    error = $"Invalid gateway setting {path}='{raw}' (expected integer >= {min})";
+                    return false;
+                }
+            }
+
             // 2) 路由 / 集群 Id 唯一性
             var routeIds = config.GetSection("ReverseProxy:Routes").GetChildren().Select(c => c.Key).ToList();
             var clusterIds = config.GetSection("ReverseProxy:Clusters").GetChildren().Select(c => c.Key).ToList();
@@ -78,6 +103,18 @@ public static class ConfigValidator
                 return false;
             }
 
+            // 路由必须引用已定义的 cluster，避免启动时才发现 "unknown cluster"。
+            var clusterKeySet = new HashSet<string>(clusterIds, StringComparer.OrdinalIgnoreCase);
+            foreach (var route in config.GetSection("ReverseProxy:Routes").GetChildren())
+            {
+                var clusterId = route["ClusterId"];
+                if (string.IsNullOrWhiteSpace(clusterId) || !clusterKeySet.Contains(clusterId))
+                {
+                    error = $"Route '{route.Key}' references unknown ClusterId '{clusterId}'";
+                    return false;
+                }
+            }
+
             // 3) 目的地地址合法性
             foreach (var cluster in config.GetSection("ReverseProxy:Clusters").GetChildren())
             {
@@ -94,11 +131,47 @@ public static class ConfigValidator
                 }
             }
 
-            // 4) 用 YARP 自带校验器验证每条路由的 Transforms。
-            //    这一步是 --test-config 的关键补强：此前非法的 transform（如 "RequestHeaders"
-            //    拼写错误）能通过预检，却在 YARP 启动时抛 "Unknown transform" 崩溃。
-            //    现在预检阶段即拦截，且与热重载闸门共用同一标准。
             var validator = YarpValidator.Value;
+
+            // 4) 用 YARP 自带校验器验证 Cluster（负载均衡策略、请求超时格式、会话保持等）。
+            //    此前只校验路由 transform，非法 cluster 要到启动或首次请求才暴露。
+            foreach (var cluster in config.GetSection("ReverseProxy:Clusters").GetChildren())
+            {
+                var destinations = new Dictionary<string, DestinationConfig>(StringComparer.OrdinalIgnoreCase);
+                foreach (var dest in cluster.GetSection("Destinations").GetChildren())
+                {
+                    var metadata = dest.GetSection("Metadata");
+                    var items = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    if (metadata.Exists())
+                    {
+                        foreach (var kv in metadata.GetChildren()) items[kv.Key] = kv.Value ?? string.Empty;
+                    }
+                    var destination = new DestinationConfig
+                    {
+                        Address = dest["Address"] ?? string.Empty,
+                        Metadata = items // YARP 的 Metadata 是 init-only，必须在构造时赋值
+                    };
+                    destinations[dest.Key] = destination;
+                }
+
+                var clusterConfig = new ClusterConfig
+                {
+                    ClusterId = cluster.Key,
+                    LoadBalancingPolicy = cluster["LoadBalancingPolicy"],
+                    Destinations = destinations
+                };
+                var clusterErrors = validator.ValidateClusterAsync(clusterConfig).AsTask().GetAwaiter().GetResult();
+                if (clusterErrors.Count > 0)
+                {
+                    error = $"Invalid cluster '{cluster.Key}': "
+                          + string.Join("; ", clusterErrors.Select(e => e.Message));
+                    return false;
+                }
+            }
+
+            // 5) 用 YARP 自带校验器验证每条路由的 Transforms。
+            //    此前非法的 transform（如 "RequestHeaders" 拼写错误）能通过预检，
+            //    却在 YARP 启动时抛 "Unknown transform" 崩溃，这里提前拦截。
             foreach (var route in config.GetSection("ReverseProxy:Routes").GetChildren())
             {
                 var transforms = ReadTransforms(route.GetSection("Transforms"));

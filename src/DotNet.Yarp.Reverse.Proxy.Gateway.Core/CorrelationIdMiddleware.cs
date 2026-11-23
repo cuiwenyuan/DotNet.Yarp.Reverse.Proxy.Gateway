@@ -56,15 +56,17 @@ public class CorrelationIdMiddleware
             return;
         }
 
-        var requestId = ResolveRequestId(context);
-        context.Items[CorrelationContext.ItemsKey] = requestId;
-        CorrelationContext.Set(requestId);
-
-        if (_options.EchoResponseHeader && !context.Response.HasStarted)
-            context.Response.Headers[_headerName] = requestId;
-
         try
         {
+            // 初始化全部放进 try：若写响应头抛异常，finally 仍能清理 AsyncLocal，
+            // 避免后续代码误用上一个请求的链路 ID。
+            var requestId = ResolveRequestId(context);
+            context.Items[CorrelationContext.ItemsKey] = requestId;
+            CorrelationContext.Set(requestId);
+
+            if (_options.EchoResponseHeader && !context.Response.HasStarted)
+                context.Response.Headers[_headerName] = requestId;
+
             await _next(context);
         }
         finally
@@ -78,10 +80,10 @@ public class CorrelationIdMiddleware
     private string ResolveRequestId(HttpContext context)
     {
         if (_options.TrustIncoming
-            && context.Request.Headers.TryGetValue(_headerName, out var incoming)
-            && IsValidId(incoming.ToString()))
+            && context.Request.Headers.TryGetValue(_headerName, out var incoming))
         {
-            return incoming.ToString();
+            var candidate = incoming.ToString();
+            if (IsValidId(candidate)) return candidate;
         }
         return Guid.NewGuid().ToString("N");
     }

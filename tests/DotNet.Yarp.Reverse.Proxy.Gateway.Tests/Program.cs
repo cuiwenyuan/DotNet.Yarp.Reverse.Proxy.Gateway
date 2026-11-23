@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 using Microsoft.AspNetCore.Http;
@@ -24,6 +25,12 @@ internal static class Program
         await Run("重试中间件记录额外尝试与预算耗尽", TestRetryCounters);
         await Run("熔断中间件记录失败/快速失败并暴露状态", TestCircuitCounters);
         await Run("未处理异常按 500 计入状态码分布", TestExceptionStatusCode);
+        await Run("缓存元数据与响应体同生命周期且过期后可重新写入", TestCacheMetaLifecycle);
+        await Run("熔断半开配额与跨代探测结果隔离", TestCircuitHalfOpenGeneration);
+        await Run("熔断分桶数量存在硬上限", TestCircuitBucketLimit);
+        await Run("管理端点 ReloadEnabled 开关与 XFF 伪造防护", TestAdminReloadGuards);
+        await Run("Prometheus 计数器命名符合规范", TestCounterNaming);
+        await Run("IP 规则热重载原子发布", TestIpFilterSnapshot);
 
         Console.WriteLine();
         Console.WriteLine($"Tests: {_passed + _failed}, Passed: {_passed}, Failed: {_failed}");
@@ -148,7 +155,7 @@ internal static class Program
         Check(metricsWithBreaker.RenderPrometheus().Contains(
             "gateway_circuit_breaker_state{bucket=\"/api\"} 1", StringComparison.Ordinal),
             "缺少分桶熔断状态");
-        Check(circuits.Snapshot().Count == 0, "测试间注册表串扰");
+        Check(registry.Snapshot().Count == 1, "熔断分桶未正确登记（原断言为空注册表，属永真断言）");
     }
 
     private static Task TestCircuitRegistry()
@@ -382,5 +389,145 @@ internal static class Program
         var snapshot = metrics.GetSnapshot();
         Check(snapshot.StatusCodes.TryGetValue(StatusCodes.Status500InternalServerError, out var count) && count == 1,
             "未处理异常应计入 500 而不是 200");
+    }
+
+    private static async Task TestCacheMetaLifecycle()
+    {
+        var options = new CacheOptions
+        {
+            Enabled = true,
+            DefaultTtlSeconds = 1,
+            MaxCacheEntries = 2,
+            CacheableStatusCodes = new[] { StatusCodes.Status200OK }
+        };
+        var (metrics, _, _) = NewMetrics();
+        var cache = new SimpleMemoryCache();
+        var calls = 0;
+        var middleware = new ResponseCacheMiddleware(async context =>
+        {
+            calls++;
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            context.Response.ContentType = "text/plain";
+            context.Response.Headers.CacheControl = "public, max-age=1";
+            await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes("v" + calls));
+        }, options, cache, metrics);
+
+        var first = NewContext("/meta?k=1");
+        await middleware.Invoke(first);
+        var second = NewContext("/meta?k=1");
+        await middleware.Invoke(second);
+        Equal(1, calls, "第二次应命中缓存");
+        Equal("text/plain", second.Response.ContentType, "缓存元数据必须随响应体一起保留");
+        Equal("v1", Encoding.UTF8.GetString(((MemoryStream)second.Response.Body).ToArray()), "缓存内容");
+
+        await middleware.Invoke(NewContext("/meta?k=2"));
+        Equal(2, calls, "第二个 key 应正常写入");
+
+        // 两个 key 都已达到 MaxCacheEntries；等 TTL 过期后写入第三个 key，
+        // 必须触发过期回收，否则缓存会永久停止写入（旧实现的 _meta 只增不减）。
+        await Task.Delay(1200);
+        await middleware.Invoke(NewContext("/meta?k=3"));
+        Equal(3, calls, "过期条目应被回收并允许新 key 写入");
+    }
+
+    private static async Task TestCircuitHalfOpenGeneration()
+    {
+        var options = new CircuitBreakerOptions
+        {
+            Enabled = true,
+            FailureThreshold = 1,
+            OpenSeconds = 1,
+            HalfOpenMaxRequests = 1,
+            FailureStatusCodes = new[] { StatusCodes.Status503ServiceUnavailable }
+        };
+        var breaker = new CircuitBreaker(options);
+        breaker.RecordFailure();
+        Equal(CircuitBreakerState.Open, breaker.State, "失败达阈值应打开");
+
+        await Task.Delay(1150);
+        Check(breaker.AllowRequest(out var firstGeneration), "到期后应放行第一个探测");
+        Check(firstGeneration > 0, "半开探测必须带代编号");
+        Check(!breaker.AllowRequest(out _), "HalfOpenMaxRequests=1 时第二个探测应被拒绝（含触发转换的请求）");
+
+        breaker.RecordSuccess(firstGeneration);
+        Equal(CircuitBreakerState.Closed, breaker.State, "探测成功应恢复 Closed");
+
+        breaker.RecordFailure();
+        Equal(CircuitBreakerState.Open, breaker.State, "再次失败应重新打开");
+        await Task.Delay(1150);
+        Check(breaker.AllowRequest(out var secondGeneration), "新的开放期应放行探测");
+        Check(secondGeneration != firstGeneration, "半开代编号必须递增");
+
+        breaker.RecordSuccess(firstGeneration); // 上一代探测的迟到结果
+        Equal(CircuitBreakerState.HalfOpen, breaker.State, "上一代迟到结果不得影响当前半开状态");
+    }
+
+    private static Task TestCircuitBucketLimit()
+    {
+        var registry = new CircuitBreakerRegistry(new CircuitBreakerOptions());
+        for (var i = 0; i < CircuitBreakerRegistry.MaxBuckets + 100; i++)
+        {
+            registry.GetOrAdd("/path" + i);
+        }
+        Check(registry.Snapshot().Count <= CircuitBreakerRegistry.MaxBuckets,
+            "熔断分桶必须有硬上限，防止任意路径导致无界增长");
+        Check(registry.Snapshot().ContainsKey("__overflow__"), "超限路径应归入 overflow 桶");
+        return Task.CompletedTask;
+    }
+
+    private static async Task TestAdminReloadGuards()
+    {
+        var (metrics, _, _) = NewMetrics();
+
+        var nextCalls = 0;
+        var disabled = new AdminStatusMiddleware(
+            _ => { nextCalls++; return Task.CompletedTask; },
+            new AdminOptions { Enabled = true, ReloadEnabled = false },
+            metrics);
+        var ctx = NewContext("/admin/reload", "POST");
+        await disabled.Invoke(ctx);
+        Equal(1, nextCalls, "ReloadEnabled=false 时 /admin/reload 不得被处理");
+
+        var guarded = new AdminStatusMiddleware(
+            _ => Task.CompletedTask,
+            new AdminOptions { Enabled = true, ReloadEnabled = true },
+            metrics);
+        var forged = NewContext("/admin/reload", "POST");
+        forged.Connection.RemoteIpAddress = IPAddress.Loopback; // 被 XFF 改写后的值
+        forged.Items[AdminStatusMiddleware.OriginalRemoteIpItemsKey] = IPAddress.Parse("8.8.8.8"); // 真实来源
+        await guarded.Invoke(forged);
+        Equal(StatusCodes.Status403Forbidden, forged.Response.StatusCode,
+            "伪造 X-Forwarded-For 不得绕过 localhost 限制");
+    }
+
+    private static Task TestCounterNaming()
+    {
+        var (metrics, _, _) = NewMetrics();
+        var text = metrics.RenderPrometheus();
+        Check(text.Contains("gateway_request_duration_ms_total ", StringComparison.Ordinal),
+            "counter 必须以 _total 结尾");
+        Check(!text.Contains("gateway_request_duration_ms_sum", StringComparison.Ordinal),
+            "不应再输出不符合规范的 _sum counter");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestIpFilterSnapshot()
+    {
+        var state = new IpFilterState(new IpFilterOptions
+        {
+            Enabled = true,
+            Deny = new[] { "192.168.1.0/24" }
+        });
+        Check(state.IsBlocked("192.168.1.5"), "旧黑名单应生效");
+
+        // 把同一网段从 deny 翻转为 allow：若规则集跨代混用，两个断言不可能同时成立。
+        state.ApplyOptions(new IpFilterOptions
+        {
+            Enabled = true,
+            Allow = new[] { "192.168.1.0/24" }
+        });
+        Check(!state.IsBlocked("192.168.1.5"), "旧 deny 规则不得残留");
+        Check(state.IsBlocked("172.16.0.1"), "新白名单应立即生效（名单外拒绝）");
+        return Task.CompletedTask;
     }
 }

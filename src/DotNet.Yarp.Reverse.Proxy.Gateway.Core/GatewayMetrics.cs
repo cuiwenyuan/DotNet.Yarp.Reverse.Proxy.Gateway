@@ -195,7 +195,8 @@ public sealed class GatewayMetrics
             Interlocked.Read(ref _totalRequests));
         AppendGauge(sb, "gateway_requests_inflight", "Currently in-flight requests.",
             Interlocked.Read(ref _inFlight));
-        AppendCounter(sb, "gateway_request_duration_ms_sum", "Cumulative request duration in milliseconds.",
+        // Prometheus 约定：counter 名称必须以 _total 结尾（_sum 属于 histogram/summary）。
+        AppendCounter(sb, "gateway_request_duration_ms_total", "Cumulative request duration in milliseconds.",
             Interlocked.Read(ref _totalDurationMs));
         AppendGauge(sb, "gateway_request_duration_ms_max", "Maximum request duration in milliseconds.",
             Interlocked.Read(ref _maxDurationMs));

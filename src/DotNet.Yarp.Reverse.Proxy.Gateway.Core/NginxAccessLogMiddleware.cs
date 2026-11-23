@@ -45,6 +45,9 @@ public class NginxAccessLogOptions
 /// </summary>
 public sealed class NginxAccessLogWriter : IDisposable
 {
+    // 批量落盘阈值：避免每行一次 Flush 把高 QPS 请求串行化在磁盘 I/O 上。
+    private const long FlushThresholdBytes = 64 * 1024;
+
     private readonly NginxAccessLogOptions _options;
     private readonly object _gate = new();
     private readonly string _fullPath;
@@ -71,7 +74,10 @@ public sealed class NginxAccessLogWriter : IDisposable
                 if (_writer is null) return;
                 _writer.WriteLine(line);
                 _currentBytes += Encoding.UTF8.GetByteCount(line) + Environment.NewLine.Length;
-                _writer.Flush();
+                if (_currentBytes >= FlushThresholdBytes)
+                {
+                    _writer.Flush();
+                }
                 if (_options.MaxFileBytes > 0 && _currentBytes >= _options.MaxFileBytes)
                     Rotate();
             }
@@ -101,6 +107,13 @@ public sealed class NginxAccessLogWriter : IDisposable
         _writer = null;
         _currentBytes = 0;
         var keep = Math.Max(0, _options.RetainedFiles);
+        if (keep == 0)
+        {
+            // "不留历史"必须删掉当前文件再新建，否则 Append 重开会导致文件无限增长。
+            try { File.Delete(_fullPath); }
+            catch (Exception ex) { GatewayLogger.Warn($"NginxAccessLog 删除轮转文件失败: {ex.Message}"); }
+            return;
+        }
         // 删除最旧，然后依次后移：access.log.2 <- .1 <- access.log
         for (var i = keep; i >= 1; i--)
         {
@@ -123,6 +136,8 @@ public sealed class NginxAccessLogWriter : IDisposable
     {
         lock (_gate)
         {
+            // 进程退出前把未满阈值的数据刷盘，避免丢失最后一段访问日志。
+            _writer?.Flush();
             _writer?.Dispose();
             _writer = null;
         }

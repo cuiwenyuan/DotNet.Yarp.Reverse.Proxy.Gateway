@@ -5,27 +5,39 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Core;
 
 /// <summary>
 /// IP 黑白名单共享状态（单例）：预解析 CIDR 规则并支持运行时热更新配置。
-/// 中间件每次请求经 IsAllowed 判断；管理端点热重载时调用 ApplyOptions 重建规则集。
-/// 纯 BCL 实现。
+/// 规则集与开关打包为不可变快照，一次 Volatile.Write 发布：请求线程一次 Volatile.Read
+/// 拿到同一代配置，杜绝"新 Enabled + 旧规则"这类跨代组合。纯 BCL 实现。
 /// </summary>
 public sealed class IpFilterState
 {
     private readonly object _gate = new();
-    private IpFilterOptions _options;
-    private IpAddressUtil.CidrRule[] _allow = Array.Empty<IpAddressUtil.CidrRule>();
-    private IpAddressUtil.CidrRule[] _deny = Array.Empty<IpAddressUtil.CidrRule>();
 
-    public IpFilterState(IpFilterOptions options)
+    /// <summary>一代完整规则集；构造完成后不再修改。</summary>
+    private sealed class IpRules
     {
-        _options = options;
-        RebuildRules(options);
+        public readonly bool Enabled;
+        public readonly int StatusCode;
+        public readonly IpAddressUtil.CidrRule[] Allow;
+        public readonly IpAddressUtil.CidrRule[] Deny;
+
+        public IpRules(IpFilterOptions options)
+        {
+            Enabled = options.Enabled;
+            StatusCode = options.StatusCode;
+            Allow = IpAddressUtil.ParseList(options.Allow);
+            Deny = IpAddressUtil.ParseList(options.Deny);
+        }
     }
 
+    private IpRules _rules;
+
+    public IpFilterState(IpFilterOptions options) => _rules = new IpRules(options);
+
     /// <summary>拦截时返回的状态码。</summary>
-    public int StatusCode => _options.StatusCode;
+    public int StatusCode => Volatile.Read(ref _rules).StatusCode;
 
     /// <summary>是否启用 IP 过滤。</summary>
-    public bool Enabled => _options.Enabled;
+    public bool Enabled => Volatile.Read(ref _rules).Enabled;
 
     /// <summary>
     /// 判断来源 IP 是否被拦截（黑名单命中或不在白名单内）。
@@ -33,30 +45,24 @@ public sealed class IpFilterState
     /// </summary>
     public bool IsBlocked(string? ip)
     {
-        if (!_options.Enabled || string.IsNullOrEmpty(ip)) return false;
+        // 一次读取整代快照，后续判断只用这一份，避免热重载期间 allow/deny 跨代混用。
+        var rules = Volatile.Read(ref _rules);
+        if (!rules.Enabled || string.IsNullOrEmpty(ip)) return false;
         if (!IPAddress.TryParse(ip, out var address)) return false;
 
-        var allow = _allow;
-        var deny = _deny;
-        var denied = IpAddressUtil.MatchesAny(address, deny);
-        var allowed = allow.Length == 0 || IpAddressUtil.MatchesAny(address, allow);
+        var denied = IpAddressUtil.MatchesAny(address, rules.Deny);
+        var allowed = rules.Allow.Length == 0 || IpAddressUtil.MatchesAny(address, rules.Allow);
         return denied || !allowed;
     }
 
-    /// <summary>热重载：替换配置并重建规则集。</summary>
+    /// <summary>热重载：构造完整新规则集后一次性原子发布。</summary>
     public void ApplyOptions(IpFilterOptions options)
     {
+        var next = new IpRules(options); // 解析放在锁外，缩短临界区
         lock (_gate)
         {
-            _options = options;
-            RebuildRules(options);
+            Volatile.Write(ref _rules, next);
         }
-    }
-
-    private void RebuildRules(IpFilterOptions options)
-    {
-        _allow = IpAddressUtil.ParseList(options.Allow);
-        _deny = IpAddressUtil.ParseList(options.Deny);
     }
 }
 
