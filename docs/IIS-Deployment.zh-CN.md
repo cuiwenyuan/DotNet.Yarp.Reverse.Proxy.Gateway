@@ -5,6 +5,7 @@
 
 > 配套文档：[README（中文）](../README.md) · [系统架构（中文）](Architecture.zh-CN.md) ·
 > [nginx → 网关迁移对照](Nginx-to-Gateway-Migration.md) ·
+> [Windows 服务部署技术评估（NewLife.Agent）](Windows-Service-NewLifeAgent-Assessment.zh-CN.md) ·
 > **English: [IIS Deployment Guide](IIS-Deployment.en.md)**
 
 > 适用版本：.NET 6 / 8 / 10 三目标框架均支持。下文以 `net10.0` 为例（LTS，推荐）；

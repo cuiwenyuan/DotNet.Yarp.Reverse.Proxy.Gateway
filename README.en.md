@@ -296,7 +296,11 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # Repo root (local work dir may be named Do
     ├── Competitive-Analysis.zh-CN.md     # Competitive analysis (Chinese, incl. 2026 newcomers)
     ├── Competitive-Analysis.en.md        # Competitive Analysis (English)
     ├── IIS-Deployment.zh-CN.md           # IIS deployment guide (Chinese)
-    └── IIS-Deployment.en.md              # IIS Deployment Guide (English)
+    ├── IIS-Deployment.en.md              # IIS Deployment Guide (English)
+    ├── Windows-Service-NewLifeAgent-Assessment.zh-CN.md  # Windows Service assessment (Chinese)
+    ├── Windows-Service-NewLifeAgent-Assessment.en.md     # Windows Service Deployment Assessment (English)
+    ├── Roadmap.zh-CN.md                  # Roadmap and backlog (Chinese)
+    └── Roadmap.en.md                     # Roadmap and Backlog (English)
 ```
 
 ## 7. Request pipeline (outer → inner)
@@ -610,7 +614,12 @@ See **[System Architecture (English)](docs/Architecture.en.md)** /
 **[Competitive Analysis (English)](docs/Competitive-Analysis.en.md)** /
 **[竞品分析（中文）](docs/Competitive-Analysis.zh-CN.md)** for the competitive landscape, and
 **[IIS Deployment Guide (English)](docs/IIS-Deployment.en.md)** /
-**[IIS 安装部署指南（中文）](docs/IIS-Deployment.zh-CN.md)** for the deployment steps.
+**[IIS 安装部署指南（中文）](docs/IIS-Deployment.zh-CN.md)** for the deployment steps,
+and **[Windows Service Deployment Assessment (English)](docs/Windows-Service-NewLifeAgent-Assessment.en.md)** /
+**[Windows 服务部署技术评估（中文）](docs/Windows-Service-NewLifeAgent-Assessment.zh-CN.md)**
+if you are considering NewLife.Agent hosting as a Windows Service instead of IIS.
+That option is **approved but waiting for a real need**; the implementation plan is in
+**[Roadmap and Backlog (English)](docs/Roadmap.en.md)** / **[计划与待办（中文）](docs/Roadmap.zh-CN.md)**.
 
 Quick steps:
 

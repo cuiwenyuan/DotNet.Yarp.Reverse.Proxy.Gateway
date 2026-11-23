@@ -5,6 +5,7 @@ Server, using the **ASP.NET Core Module (ANCM)** in **inprocess** mode.
 
 > Companion docs: [README](../README.en.md) · [System Architecture](Architecture.en.md) ·
 > [nginx → Gateway Migration Guide](Nginx-to-Gateway-Migration.en.md) ·
+> [Windows Service Deployment Assessment (NewLife.Agent)](Windows-Service-NewLifeAgent-Assessment.en.md) ·
 > **中文版： [IIS 安装部署指南](IIS-Deployment.zh-CN.md)**
 
 > .NET 6 / 8 / 10 multi-targeting is supported. The steps below use `net10.0` (LTS, recommended);

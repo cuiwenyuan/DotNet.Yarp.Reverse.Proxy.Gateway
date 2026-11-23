@@ -276,7 +276,11 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
     ├── Competitive-Analysis.zh-CN.md     # 竞品分析（中文，含 2026 新竞品）
     ├── Competitive-Analysis.en.md        # Competitive Analysis (English)
     ├── IIS-Deployment.zh-CN.md           # IIS 安装部署指南（中文）
-    └── IIS-Deployment.en.md              # IIS Deployment Guide（English）
+    ├── IIS-Deployment.en.md              # IIS Deployment Guide（English）
+    ├── Windows-Service-NewLifeAgent-Assessment.zh-CN.md  # Windows 服务部署技术评估（中文）
+    ├── Windows-Service-NewLifeAgent-Assessment.en.md     # Windows Service Assessment (English)
+    ├── Roadmap.zh-CN.md                  # 计划与待办：已批准待触发 / 待评估（中文）
+    └── Roadmap.en.md                     # Roadmap and Backlog (English)
 ```
 
 ## 7. 请求处理管线（由外到内）
@@ -584,7 +588,12 @@ nginx 迁移对照见 **[nginx → 网关迁移对照（中文）](docs/Nginx-to
 竞品分析见 **[竞品分析（中文）](docs/Competitive-Analysis.zh-CN.md)** /
 **[Competitive Analysis (English)](docs/Competitive-Analysis.en.md)**；
 部署步骤详见 **[IIS 安装部署指南（中文）](docs/IIS-Deployment.zh-CN.md)** /
-**[IIS Deployment Guide (English)](docs/IIS-Deployment.en.md)**。
+**[IIS Deployment Guide (English)](docs/IIS-Deployment.en.md)**；
+若考虑改为 Windows 服务（NewLife.Agent）托管，见
+**[Windows 服务部署技术评估（中文）](docs/Windows-Service-NewLifeAgent-Assessment.zh-CN.md)** /
+**[Windows Service Deployment Assessment (English)](docs/Windows-Service-NewLifeAgent-Assessment.en.md)**；
+该方案**已批准、待真实需求触发**，实施计划见
+**[计划与待办（中文）](docs/Roadmap.zh-CN.md)** / **[Roadmap and Backlog (English)](docs/Roadmap.en.md)**。
 
 简要步骤：
 
