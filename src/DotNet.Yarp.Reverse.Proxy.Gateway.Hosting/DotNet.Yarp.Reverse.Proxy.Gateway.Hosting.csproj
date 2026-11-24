@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 与 Core / Web / Service 保持一致的三目标框架 -->
+    <TargetFrameworks>net6.0;net8.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 应用层需要 YARP：反向代理注册、配置模型、负载均衡策略、配置校验器都在这里。
+         这是「宿主无关的网关应用层」，故意与 Core 分开：
+           Core     —— 治理内核，仅 NewLife.Core，不依赖 YARP（可移植）
+           Hosting  —— 应用层，依赖 Core + YARP（管线组装、配置校验、负载策略）
+           Web/Service —— 宿主层，各自只做「怎么跑起来」 -->
+    <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DotNet.Yarp.Reverse.Proxy.Gateway.Core\DotNet.Yarp.Reverse.Proxy.Gateway.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WebApplication / 中间件 / 响应压缩等框架类型；FrameworkReference 不是 NuGet 包 -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

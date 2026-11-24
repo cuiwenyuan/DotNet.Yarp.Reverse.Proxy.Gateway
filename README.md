@@ -105,17 +105,21 @@ CI/CD 与日志体系。本项目用**纯 .NET** 实现一套可托管在 IIS �
 
 ## 3. 技术栈与依赖约束
 
-**硬约束：整个方案只引用两个 NuGet 包**，其余能力全部用 .NET BCL（标准类库）或 ASP.NET Core 框架自带能力实现。
+**依赖约束：治理内核只引用两个 NuGet 包**，其余能力全部用 .NET BCL（标准类库）或 ASP.NET Core 框架自带能力实现。
+2026-11-23 起，**Windows 服务宿主（`Gateway.Service`）额外引入 `NewLife.Agent`** —— 这是唯一一处例外，
+且只出现在那一个宿主项目里：IIS 产物不含它，`Core` 仍只有两个包。
 
 | 包 / 引用 | 作用 | 类型 |
 | --- | --- | --- |
 | `Yarp.ReverseProxy` 2.3.0 | 微软官方反向代理内核 | 第三方 NuGet（允许） |
 | `NewLife.Core` 12.0.2026.1024 | 日志（XTrace）、配置、缓存基础设施 | 第三方 NuGet（允许，唯一额外第三方） |
+| `NewLife.Agent` 10.18.2026.1024 | Windows 服务安装/启停、健康监控、看门狗 | 第三方 NuGet（**仅 `Gateway.Service`**） |
 | `Microsoft.AspNetCore.App` | ASP.NET Core 共享框架（HttpContext / 中间件等） | FrameworkReference（**非** NuGet） |
 | 其余全部 | 限流、缓存、认证、CORS、扩展名拦截、日志等 | 纯 C# BCL 自研 |
 
-> 说明：`Microsoft.AspNetCore.App` 是编写 ASP.NET Core 应用/中间件的**标准框架引用**，不属于第三方包，
-> 不会违反"只引两个 NuGet"的约束。限流特意**没有**使用 `System.Threading.RateLimiting`
+> 说明：`Microsoft.AspNetCore.App` 是编写 ASP.NET Core 应用/中间件的**标准框架引用**，不属于第三方包。
+> `NewLife.Agent` 只依赖 `NewLife.Core` **同一版本**（12.0.2026.1024），不会引起版本漂移；
+> 不采用 Windows 服务部署时它完全不出现在产物里。限流特意**没有**使用 `System.Threading.RateLimiting`
 > （.NET 7+ 专属），而是自研 `SimpleRateLimiter` 令牌桶以兼容 .NET 6 / 8 / 10 三目标框架。
 
 ## 4. 环境要求
@@ -256,13 +260,20 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
 │   │   ├── ProxyLoggingMiddleware.cs      # 请求/响应详情日志
 │   │   ├── SimpleMemoryCache.cs          # 内置内存缓存组件（扩展点）
 │   │   └── GatewayLogger.cs              # NewLife.Core XTrace 日志封装
-│   └── DotNet.Yarp.Reverse.Proxy.Gateway.Web/    # ASP.NET Core 宿主（仅引 YARP + 项目引用）
-│       ├── Program.cs                    # 管线组装 + --test-config 预检
-│       ├── ConfigValidator.cs            # 配置预检工具（--test-config）
-│       ├── WeightedLoadBalancingPolicy.cs # 加权负载策略（Metadata.Weight）
-│       ├── appsettings.json              # 路由 / 集群 / 治理配置
-│       ├── web.config                    # IIS（ANCM）托管配置
-│       └── wwwroot/index.html            # 静态首页
+│   ├── DotNet.Yarp.Reverse.Proxy.Gateway.Hosting/  # 应用层：管线组装 + 校验 + 负载策略（引 Core + YARP）
+│   │   ├── GatewayHostFactory.cs         # 服务注册与中间件顺序（唯一真相，两宿主共用）
+│   │   ├── GatewayCommandLine.cs         # --test-config / --diff-config / --convert-nginx
+│   │   ├── ConfigValidator.cs            # 配置预检（启动预检 + 热重载闸门共用）
+│   │   └── WeightedLoadBalancingPolicy.cs # 加权负载策略（Metadata.Weight）
+│   ├── DotNet.Yarp.Reverse.Proxy.Gateway.Web/      # IIS/ANCM 宿主（薄壳，不直接引 YARP）
+│   │   ├── Program.cs                    # CLI 短路 → Hosting 构建 → Run
+│   │   ├── appsettings.json              # 路由 / 集群 / 治理配置（与 Service 同源）
+│   │   ├── web.config                    # IIS（ANCM）托管配置
+│   │   └── wwwroot/index.html            # 静态首页
+│   └── DotNet.Yarp.Reverse.Proxy.Gateway.Service/  # Windows 服务宿主（NewLife.Agent）
+│       ├── Program.cs                    # 入口三分流（CLI / 无参数直跑 / Agent 命令）
+│       ├── GatewayService.cs             # ServiceBase：StartWork 启 Kestrel、StopWork 排空
+│       └── Config/Agent.config           # 服务元数据与健康阈值（管理面板默认关闭）
 ├── scripts/
 │   ├── verify.ps1                        # 验收脚本
 │   ├── echo_backend.py                   # 冒烟后端（web 集群）
@@ -279,6 +290,8 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # 仓库根（本地工作目录名可能�
     ├── IIS-Deployment.en.md              # IIS Deployment Guide（English）
     ├── Windows-Service-NewLifeAgent-Assessment.zh-CN.md  # Windows 服务部署技术评估（中文）
     ├── Windows-Service-NewLifeAgent-Assessment.en.md     # Windows Service Assessment (English)
+    ├── Windows-Service-Deployment.zh-CN.md              # Windows 服务部署指南（中文）
+    ├── Windows-Service-Deployment.en.md                 # Windows Service Deployment (English)
     ├── Roadmap.zh-CN.md                  # 计划与待办：已批准待触发 / 待评估（中文）
     └── Roadmap.en.md                     # Roadmap and Backlog (English)
 ```
@@ -590,10 +603,12 @@ nginx 迁移对照见 **[nginx → 网关迁移对照（中文）](docs/Nginx-to
 部署步骤详见 **[IIS 安装部署指南（中文）](docs/IIS-Deployment.zh-CN.md)** /
 **[IIS Deployment Guide (English)](docs/IIS-Deployment.en.md)**；
 若考虑改为 Windows 服务（NewLife.Agent）托管，见
-**[Windows 服务部署技术评估（中文）](docs/Windows-Service-NewLifeAgent-Assessment.zh-CN.md)** /
-**[Windows Service Deployment Assessment (English)](docs/Windows-Service-NewLifeAgent-Assessment.en.md)**；
-该方案**已批准、待真实需求触发**，实施计划见
-**[计划与待办（中文）](docs/Roadmap.zh-CN.md)** / **[Roadmap and Backlog (English)](docs/Roadmap.en.md)**。
+**[Windows 服务部署指南（中文）](docs/Windows-Service-Deployment.zh-CN.md)** /
+**[Windows Service Deployment Guide (English)](docs/Windows-Service-Deployment.en.md)**；
+设计取舍与 IIS 逐项对比见
+**[技术评估（中文）](docs/Windows-Service-NewLifeAgent-Assessment.zh-CN.md)** /
+**[Assessment (English)](docs/Windows-Service-NewLifeAgent-Assessment.en.md)**。
+后续任务见 **[计划与待办（中文）](docs/Roadmap.zh-CN.md)** / **[Roadmap (English)](docs/Roadmap.en.md)**。
 
 简要步骤：
 

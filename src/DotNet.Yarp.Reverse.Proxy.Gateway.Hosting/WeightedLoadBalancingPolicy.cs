@@ -1,8 +1,9 @@
 using System.Buffers;
+using Microsoft.AspNetCore.Http;
 using Yarp.ReverseProxy.LoadBalancing;
 using Yarp.ReverseProxy.Model;
 
-namespace DotNet.Yarp.Reverse.Proxy.Gateway.Web;
+namespace DotNet.Yarp.Reverse.Proxy.Gateway.Hosting;
 
 /// <summary>
 /// 加权随机负载均衡策略（对应 nginx upstream 的 weight 指令）。
@@ -11,7 +12,7 @@ namespace DotNet.Yarp.Reverse.Proxy.Gateway.Web;
 ///   "api2": { "Address": "http://localhost:5102/", "Metadata": { "Weight": "1" } }
 /// 未声明权重时默认 1。集群设置 "LoadBalancingPolicy": "Weighted" 即启用。
 /// 配合按 header 匹配的 canary 路由（YARP Match.Headers）可实现灰度发布。
-/// 依赖 YARP 类型，故放在 Web 宿主项目（Core 类库保持不引 YARP）。
+/// 依赖 YARP 类型，故放在 Hosting 应用层（Core 类库保持不引 YARP，由 Web / Service 两个宿主共用）。
 /// </summary>
 public sealed class WeightedLoadBalancingPolicy : ILoadBalancingPolicy
 {

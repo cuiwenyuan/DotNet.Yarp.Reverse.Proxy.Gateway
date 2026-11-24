@@ -3,13 +3,14 @@
 > 评估对象：把 `DotNet.Yarp.Reverse.Proxy.Gateway` 以 Windows 服务形式部署（NewLife.Agent 托管），
 > 与当前 IIS + ANCM 部署方式做全面对比。
 >
-> 评估日期：2026-11-23 · 状态：**已批准，待触发实施** · 结论：**可行；已决定引入 `NewLife.Agent`**
+> 评估日期：2026-11-23 · 状态：**已实施 S1（2026-11-24）** · 结论：**可行；`NewLife.Agent` 已引入，双宿主跑通**
 
 > **决策更新（2026-11-23）**：已批准引入第 3 个 NuGet 包 `NewLife.Agent`，并确定采用**独立宿主项目**形态——
 > 新增 `DotNet.Yarp.Reverse.Proxy.Gateway.Service`（Windows 服务宿主）与
 > `DotNet.Yarp.Reverse.Proxy.Gateway.Hosting`（共享管线组装），`Gateway.Core` 的依赖约束不变。
 > 因此第 3 节方案 A 中"给 `Web` 项目加包 + 入口三分流"的写法**不再采用**，改为"A'：独立宿主 + 共享 Hosting"。
-> 实施时机、任务拆解与验收标准见 **[Roadmap](Roadmap.zh-CN.md)**。
+> 实施时机、任务拆解与验收标准见 **[Roadmap](Roadmap.zh-CN.md)** —— **S1 已于 2026-11-24 落地并通过双宿主冒烟**，
+> 部署方式见 **[Windows 服务部署指南](Windows-Service-Deployment.zh-CN.md)**。
 > 下文第 3/5/6 节保留评估当时的原始分析（含当时的形态假设），供回溯对照；结论与坑位清单仍然有效。
 
 ---

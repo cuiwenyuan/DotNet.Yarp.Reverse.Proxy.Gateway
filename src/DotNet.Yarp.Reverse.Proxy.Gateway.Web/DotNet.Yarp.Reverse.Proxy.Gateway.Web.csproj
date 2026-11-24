@@ -9,11 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\DotNet.Yarp.Reverse.Proxy.Gateway.Core\DotNet.Yarp.Reverse.Proxy.Gateway.Core.csproj" />
+    <!-- 宿主只依赖应用层：反向代理注册、管线顺序、配置校验都由 Hosting 承担。
+         原先 Web 直接引 YARP；抽取 Hosting 后不再需要，YARP 经项目引用传递带入。
+         这样「Web 宿主不知道自己依赖 YARP」，与 Service 宿主的依赖图完全对称。 -->
+    <ProjectReference Include="..\DotNet.Yarp.Reverse.Proxy.Gateway.Hosting\DotNet.Yarp.Reverse.Proxy.Gateway.Hosting.csproj" />
   </ItemGroup>
 
 </Project>

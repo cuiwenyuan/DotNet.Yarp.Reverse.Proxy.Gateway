@@ -6,7 +6,7 @@
 
 ---
 
-## 1. 已批准 · 待触发：Windows 服务宿主（NewLife.Agent）
+## 1. 已实施 S1：Windows 服务宿主（NewLife.Agent）
 
 ### 1.1 决策记录
 
@@ -15,8 +15,9 @@
 | 决策日期 | 2026-11-23 |
 | 决策 | **允许引入第 3 个 NuGet 包 `NewLife.Agent`**，用于 Windows 服务部署 |
 | 形态 | **独立宿主项目**，不改造现有 `Gateway.Web`；`Gateway.Core` 的依赖约束不变 |
-| 实施时机 | **暂不实施**，等出现真实部署需求（见 1.3） |
+| 实施时机 | **2026-11-24 已启动并完成 S1**（宿主可用、双宿主冒烟通过）；S2/S3 见 1.4 |
 | 依据 | [Windows 服务部署技术评估](Windows-Service-NewLifeAgent-Assessment.zh-CN.md)（含 PoC 实测） |
+| 部署文档 | [Windows 服务部署指南](Windows-Service-Deployment.zh-CN.md) |
 
 ### 1.2 目标形态
 
@@ -26,10 +27,10 @@
 src/
 ├── DotNet.Yarp.Reverse.Proxy.Gateway.Core        # 治理中间件（仅 2 包：NewLife.Core）
 │                                                  不依赖 YARP，保持可移植
-├── DotNet.Yarp.Reverse.Proxy.Gateway.Hosting     # 【新增】管线组装 + ConfigValidator + WeightedLoadBalancingPolicy
+├── DotNet.Yarp.Reverse.Proxy.Gateway.Hosting     # [已实现] 管线组装 + ConfigValidator + WeightedLoadBalancingPolicy
 │                                                  依赖 Core + Yarp.ReverseProxy（包总数不变）
-├── DotNet.Yarp.Reverse.Proxy.Gateway.Web         # IIS/ANCM 宿主（引 Hosting）
-└── DotNet.Yarp.Reverse.Proxy.Gateway.Service     # 【新增·独立文件夹】Windows 服务宿主
+├── DotNet.Yarp.Reverse.Proxy.Gateway.Web         # IIS/ANCM 宿主（引 Hosting，已改为薄壳）
+└── DotNet.Yarp.Reverse.Proxy.Gateway.Service     # [已实现] Windows 服务宿主
                                                    引 Hosting + NewLife.Agent（唯一的第 3 个包）
 ```
 
@@ -38,6 +39,9 @@ src/
 代价：`Gateway.Hosting` 会依赖 YARP，`Core` 仍然不依赖——**包总数仍是 2 个**（`Yarp.ReverseProxy` + `NewLife.Core`），只是在项目间重新分布；第 3 个包只出现在 `Service` 项目里。铁律的实质（不引第三方治理库）没有被削弱。
 
 ### 1.3 触发条件（满足任意一条再做）
+
+> **已触发（2026-11-24）**：决定提前落地宿主形态——先把"S1 可用"做出来，真实部署需求出现时直接启用，
+> 不必再等一次评估。下列条件留给后续判断 S2/S3 的优先级。
 
 1. 出现**不能安装 IIS** 的部署环境（最小化系统、受管控服务器、容器/云主机）。
 2. 需要**进程级自愈**：内存/线程/句柄阈值重启、定时重启窗口、看门狗——IIS 应用池只能粗暴地"连续崩溃就停"。
@@ -51,11 +55,11 @@ src/
 
 | 阶段 | 任务 | 验收标准 |
 | --- | --- | --- |
-| **S1 宿主可用** | ①新建 `Gateway.Hosting`，把 `Program.cs` 管线段 + `ConfigValidator` + `WeightedLoadBalancingPolicy` 迁入 ②`Gateway.Web` 改为调用 `Hosting`（行为不变，回归通过）③新建 `Gateway.Service`：`GatewayService : ServiceBase`、入口三分流、`ContentRootPath=AppContext.BaseDirectory`、关闭 Agent Web 面板 | `-install` 后服务能启动、能代理、能热重载；`-status` 显示运行中；IIS 部署方式回归通过 |
+| **S1 宿主可用** ✅ | ~~①新建 `Gateway.Hosting`…②`Gateway.Web` 改为调用 `Hosting`…③新建 `Gateway.Service`…~~ **全部完成（2026-11-24）**：`Hosting` 承载管线/校验/负载策略/CLI；`Web/Program.cs` 已缩为 3 行薄壳；`Service` 含 `ServiceBase` 宿主、入口三分流、`ContentRootPath=AppContext.BaseDirectory`、面板关闭 | **已验证**：三框架 0 错误；单测 22/22；两宿主 `--test-config` 均 OK；Web 前台直跑 `/`、`/health`、`/admin/status`、`/metrics` 正常；Service 无参数直跑同样正常；`-run` 路径下 `StartWork` 接通 Kestrel（18091 监听成功）；代理链路 `/api/probe` 经 rewrite、LB、健康检查切换后返回 200 |
 | **S2 生产就绪** | ①Kestrel 端点与 TLS（优先证书存储 `Subject`+`Store`，避免明文口令）②优雅停机排空窗口可配置（默认 30s，对齐 `HostOptions.ShutdownTimeout`）③服务账户改低权限 + 目录 ACL 脚本 ④安装/卸载脚本、发布产物 `gateway-service-<tfm>-v<版本>.zip` ⑤文档 `docs/Windows-Service-Deployment.{zh-CN,en}.md` + README 同步 | 在目标机完成一次"安装→代理→热重载→停止→卸载"全流程；`sc.exe failure` 恢复策略配置生效 |
 | **S3 验证** | ①真实 SCM 生命周期（含断电/重启后自恢复）②同配置下 IIS vs Service 压测（小包高频 + 大文件，RPS/p50/p99/CPU/工作集）③长连接排空实测 | 压测结论写入评估报告；评估状态从"已评估"升级为"已验证" |
 
-**预估**：S1 约 1–1.5 人日（比原估多半天，因为多了 `Hosting` 抽取），S2 约 2 人日，S3 视压测环境而定。
+**进度**：S1 已完成（实际约 1 人日，含 `Hosting` 抽取与双宿主冒烟）；S2 约 2 人日（TLS、账户 ACL、可配置排空、安装脚本、文档已先行）；S3 视压测环境而定。
 
 ### 1.5 实施时必读的四个坑
 

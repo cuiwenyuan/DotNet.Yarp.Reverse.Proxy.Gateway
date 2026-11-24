@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Yarp.ReverseProxy.Configuration;
 using Yarp.ReverseProxy.LoadBalancing;
 
-namespace DotNet.Yarp.Reverse.Proxy.Gateway.Web;
+namespace DotNet.Yarp.Reverse.Proxy.Gateway.Hosting;
 
 /// <summary>
 /// 配置预检工具（对应 GoReverseProxy 的 --test-config）。

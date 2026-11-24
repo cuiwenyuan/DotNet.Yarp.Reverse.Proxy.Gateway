@@ -111,13 +111,17 @@ and hard to fold into one unified operations system.
 
 ## 3. Tech stack & dependency constraints
 
-**Hard constraint: the whole solution references only two NuGet packages.** Everything else is
-implemented with the .NET BCL (standard libraries) or ASP.NET Core's built-in framework capabilities.
+**Dependency rule: the governance kernel references only two NuGet packages.** Everything else uses
+the .NET BCL or capabilities shipped with the ASP.NET Core framework. Since 2026-11-23 the
+**Windows Service host (`Gateway.Service`) additionally references `NewLife.Agent`** — the single
+exception, confined to that one host project: the IIS artifact does not contain it, and `Core` still
+has exactly two packages.
 
 | Package / Reference | Role | Type |
 | --- | --- | --- |
 | `Yarp.ReverseProxy` 2.3.0 | Microsoft's official reverse-proxy core | 3rd-party NuGet (allowed) |
 | `NewLife.Core` 12.0.2026.1024 | Logging (XTrace), config, cache infra | 3rd-party NuGet (allowed, only extra 3rd-party) |
+| `NewLife.Agent` 10.18.2026.1024 | Windows service install/start/stop, health monitoring, watchdog | 3rd-party NuGet (**`Gateway.Service` only**) |
 | `Microsoft.AspNetCore.App` | ASP.NET Core shared framework (HttpContext / middleware, etc.) | FrameworkReference (**not** NuGet) |
 | Everything else | Rate limit, cache, auth, CORS, ext block, logging | Pure C# BCL |
 
@@ -276,13 +280,20 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # Repo root (local work dir may be named Do
 │   │   ├── ProxyLoggingMiddleware.cs      # Request/response detail logging
 │   │   ├── SimpleMemoryCache.cs          # Built-in in-memory cache (extension point)
 │   │   └── GatewayLogger.cs              # NewLife.Core XTrace logging wrapper
-│   └── DotNet.Yarp.Reverse.Proxy.Gateway.Web/    # ASP.NET Core host (YARP + project ref only)
-│       ├── Program.cs                    # Pipeline assembly + --test-config precheck
-│       ├── ConfigValidator.cs            # Config precheck tool (--test-config)
-│       ├── WeightedLoadBalancingPolicy.cs # Weighted load-balancing policy (Metadata.Weight)
-│       ├── appsettings.json              # Routes / clusters / governance config
-│       ├── web.config                    # IIS (ANCM) hosting config
-│       └── wwwroot/index.html            # Static home page
+│   ├── DotNet.Yarp.Reverse.Proxy.Gateway.Hosting/  # Application layer: pipeline + validation + LB (Core + YARP)
+│   │   ├── GatewayHostFactory.cs         # Service registration & middleware order (single source of truth)
+│   │   ├── GatewayCommandLine.cs         # --test-config / --diff-config / --convert-nginx
+│   │   ├── ConfigValidator.cs            # Config precheck (startup precheck + hot-reload gate)
+│   │   └── WeightedLoadBalancingPolicy.cs # Weighted load-balancing policy (Metadata.Weight)
+│   ├── DotNet.Yarp.Reverse.Proxy.Gateway.Web/      # IIS/ANCM host (thin shell, no direct YARP reference)
+│   │   ├── Program.cs                    # CLI short-circuit -> Hosting build -> Run
+│   │   ├── appsettings.json              # Routes / clusters / governance config (shared with Service)
+│   │   ├── web.config                    # IIS (ANCM) hosting config
+│   │   └── wwwroot/index.html            # Static home page
+│   └── DotNet.Yarp.Reverse.Proxy.Gateway.Service/  # Windows Service host (NewLife.Agent)
+│       ├── Program.cs                    # Three-way entry split (CLI / no-arg direct run / Agent commands)
+│       ├── GatewayService.cs             # ServiceBase: StartWork starts Kestrel, StopWork drains
+│       └── Config/Agent.config           # Service metadata & health thresholds (panel off by default)
 ├── scripts/
 │   ├── verify.ps1                        # Verification script
 │   ├── echo_backend.py                   # Smoke backend (web cluster)
@@ -299,6 +310,8 @@ DotNet.Yarp.Reverse.Proxy.Gateway/   # Repo root (local work dir may be named Do
     ├── IIS-Deployment.en.md              # IIS Deployment Guide (English)
     ├── Windows-Service-NewLifeAgent-Assessment.zh-CN.md  # Windows Service assessment (Chinese)
     ├── Windows-Service-NewLifeAgent-Assessment.en.md     # Windows Service Deployment Assessment (English)
+    ├── Windows-Service-Deployment.zh-CN.md              # Windows Service deployment guide (Chinese)
+    ├── Windows-Service-Deployment.en.md                 # Windows Service Deployment Guide (English)
     ├── Roadmap.zh-CN.md                  # Roadmap and backlog (Chinese)
     └── Roadmap.en.md                     # Roadmap and Backlog (English)
 ```
@@ -615,11 +628,14 @@ See **[System Architecture (English)](docs/Architecture.en.md)** /
 **[竞品分析（中文）](docs/Competitive-Analysis.zh-CN.md)** for the competitive landscape, and
 **[IIS Deployment Guide (English)](docs/IIS-Deployment.en.md)** /
 **[IIS 安装部署指南（中文）](docs/IIS-Deployment.zh-CN.md)** for the deployment steps,
-and **[Windows Service Deployment Assessment (English)](docs/Windows-Service-NewLifeAgent-Assessment.en.md)** /
-**[Windows 服务部署技术评估（中文）](docs/Windows-Service-NewLifeAgent-Assessment.zh-CN.md)**
-if you are considering NewLife.Agent hosting as a Windows Service instead of IIS.
-That option is **approved but waiting for a real need**; the implementation plan is in
-**[Roadmap and Backlog (English)](docs/Roadmap.en.md)** / **[计划与待办（中文）](docs/Roadmap.zh-CN.md)**.
+Use **[Windows Service Deployment Guide (English)](docs/Windows-Service-Deployment.en.md)** /
+**[Windows 服务部署指南（中文）](docs/Windows-Service-Deployment.zh-CN.md)**
+if you want NewLife.Agent hosting instead of IIS; the design trade-offs and the item-by-item
+comparison with IIS are in
+**[Windows Service Assessment (English)](docs/Windows-Service-NewLifeAgent-Assessment.en.md)** /
+**[技术评估（中文）](docs/Windows-Service-NewLifeAgent-Assessment.zh-CN.md)**.
+Remaining work is tracked in **[Roadmap and Backlog (English)](docs/Roadmap.en.md)** /
+**[计划与待办（中文）](docs/Roadmap.zh-CN.md)**.
 
 Quick steps:
 

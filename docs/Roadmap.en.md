@@ -6,7 +6,7 @@
 
 ---
 
-## 1. Approved · waiting for trigger: Windows Service host (NewLife.Agent)
+## 1. S1 implemented: Windows Service host (NewLife.Agent)
 
 ### 1.1 Decision record
 
@@ -15,8 +15,9 @@
 | Date | 2026-11-23 |
 | Decision | **Allow a third NuGet package, `NewLife.Agent`**, for Windows Service deployment |
 | Shape | **A standalone host project**; `Gateway.Web` is not modified, and `Gateway.Core`'s dependency constraint is unchanged |
-| Timing | **Not implemented now** — wait for a real deployment need (see 1.3) |
+| Timing | **Started and completed S1 on 2026-11-24** (working host, dual-host smoke passed); S2/S3 in 1.4 |
 | Basis | [Windows Service Deployment Assessment](Windows-Service-NewLifeAgent-Assessment.en.md) (with PoC evidence) |
+| Deployment guide | [Windows Service Deployment Guide](Windows-Service-Deployment.en.md) |
 
 ### 1.2 Target shape
 
@@ -26,10 +27,10 @@ Key trade-off: **the Windows Service host gets its own project instead of a bran
 src/
 ├── DotNet.Yarp.Reverse.Proxy.Gateway.Core        # governance middleware (only 2 packages: NewLife.Core)
 │                                                  no YARP dependency, stays portable
-├── DotNet.Yarp.Reverse.Proxy.Gateway.Hosting     # [new] pipeline assembly + ConfigValidator + WeightedLoadBalancingPolicy
+├── DotNet.Yarp.Reverse.Proxy.Gateway.Hosting     # [implemented] pipeline + ConfigValidator + WeightedLoadBalancingPolicy
 │                                                  depends on Core + Yarp.ReverseProxy (total package count unchanged)
-├── DotNet.Yarp.Reverse.Proxy.Gateway.Web         # IIS/ANCM host (references Hosting)
-└── DotNet.Yarp.Reverse.Proxy.Gateway.Service     # [new, standalone folder] Windows Service host
+├── DotNet.Yarp.Reverse.Proxy.Gateway.Web         # IIS/ANCM host (references Hosting; now a thin shell)
+└── DotNet.Yarp.Reverse.Proxy.Gateway.Service     # [implemented] Windows Service host
                                                    references Hosting + NewLife.Agent (the only third package)
 ```
 
@@ -38,6 +39,10 @@ src/
 Cost: `Gateway.Hosting` will depend on YARP while `Core` still will not — **the package count stays at 2** (`Yarp.ReverseProxy` + `NewLife.Core`), merely redistributed across projects; the third package appears only in `Service`. The substance of the rule (no third-party governance libraries) is untouched.
 
 ### 1.3 Triggers (any one is enough to start)
+
+> **Triggered (2026-11-24)**: the decision was made to land the host form early — build "S1 works" now so a
+> real deployment need can use it immediately without another assessment round. The conditions below now
+> only prioritise S2/S3.
 
 1. A deployment target where **IIS cannot be installed** (minimal OS, locked-down server, container, cloud host).
 2. Need for **process-level self-healing**: memory/thread/handle threshold restarts, scheduled restart windows, watchdog — an IIS app pool can only bluntly stop after repeated crashes.
@@ -51,11 +56,12 @@ Cost: `Gateway.Hosting` will depend on YARP while `Core` still will not — **th
 
 | Stage | Tasks | Acceptance |
 | --- | --- | --- |
-| **S1 host works** | ① Create `Gateway.Hosting`; move the pipeline section of `Program.cs`, `ConfigValidator`, `WeightedLoadBalancingPolicy` into it ② Switch `Gateway.Web` to consume `Hosting` (behaviour unchanged, regression passes) ③ Create `Gateway.Service`: `GatewayService : ServiceBase`, three-way entry split, `ContentRootPath=AppContext.BaseDirectory`, Agent web panel off | After `-install`: service starts, proxies, hot-reloads; `-status` reports running; the IIS deployment path still passes regression |
+| **S1 host works** ✅ | ~~① Create `Gateway.Hosting`… ② switch `Gateway.Web`… ③ create `Gateway.Service`…~~ **All done (2026-11-24)**: `Hosting` owns the pipeline/validation/LB/CLI; `Web/Program.cs` is a 3-line shell; `Service` has the `ServiceBase` host, three-way entry split, `ContentRootPath=AppContext.BaseDirectory`, panel off | **Verified**: 3 TFMs build with 0 errors; 22/22 tests; both hosts pass `--test-config`; Web direct run serves `/`, `/health`, `/admin/status`, `/metrics`; Service no-arg run identical; the `-run` path proves `StartWork` starts Kestrel (listening on 18091); proxy chain `/api/probe` returns 200 after rewrite + LB + health-check failover |
 | **S2 production-ready** | ① Kestrel endpoints and TLS (prefer certificate-store `Subject`+`Store` over plaintext passwords) ② Configurable graceful-shutdown drain window (30 s default, aligned with `HostOptions.ShutdownTimeout`) ③ Low-privilege service account + directory ACL script ④ Install/uninstall scripts, publish artifact `gateway-service-<tfm>-v<version>.zip` ⑤ Docs `docs/Windows-Service-Deployment.{zh-CN,en}.md` + README sync | A full install → proxy → hot reload → stop → uninstall cycle on the target machine; `sc.exe failure` recovery actions verified |
 | **S3 validation** | ① Real SCM lifecycle (including power-loss/reboot recovery) ② Same-config IIS vs Service load test (small high-frequency + large transfers; RPS, p50/p99, CPU, working set) ③ Long-lived connection drain test | Load-test results written into the assessment; status upgraded from "assessed" to "verified" |
 
-**Estimate**: S1 ≈ 1–1.5 person-days (half a day more than the original estimate, because of the `Hosting` extraction), S2 ≈ 2 person-days, S3 depends on the load-test environment.
+**Progress**: S1 done (~1 person-day including the `Hosting` extraction and dual-host smoke); S2 ≈ 2 person-days
+(TLS, account ACLs, configurable drain, install script — docs already written); S3 depends on the load-test environment.
 
 ### 1.5 Four traps to read before implementing
 

@@ -48,9 +48,16 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "$env:RUNNER_TEMP\precheck"
+          # 两个宿主共用同一份 appsettings.json，但入口分流与 ContentRoot 解析各自独立，
+          # 所以两边都跑一遍预检，避免"Web 能过、Service 起不来"。
+          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Web -c Release -f net10.0 -o "$env:RUNNER_TEMP\precheck-web"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet "$env:RUNNER_TEMP\precheck\DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll" --test-config
+          dotnet "$env:RUNNER_TEMP\precheck-web\DotNet.Yarp.Reverse.Proxy.Gateway.Web.dll" --test-config
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Service -c Release -f net10.0 -o "$env:RUNNER_TEMP\precheck-svc"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet "$env:RUNNER_TEMP\precheck-svc\DotNet.Yarp.Reverse.Proxy.Gateway.Service.dll" --test-config
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # ---------- Job 2：发版（依赖 Job 1 通过；tag 或手动触发均可） ----------
@@ -126,6 +133,28 @@ jobs:
           -p:DebugType=none -p:DebugSymbols=false
           -o artifacts/net6.0
 
+      # ---------- Windows 服务宿主（NewLife.Agent）：独立产物，不带 web.config ----------
+      - name: Publish service host net10.0
+        run: >
+          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Service
+          -c Release -f net10.0 -p:Version=${{ steps.ver.outputs.version }}
+          -p:DebugType=none -p:DebugSymbols=false
+          -o artifacts/service-net10.0
+
+      - name: Publish service host net8.0
+        run: >
+          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Service
+          -c Release -f net8.0 -p:Version=${{ steps.ver.outputs.version }}
+          -p:DebugType=none -p:DebugSymbols=false
+          -o artifacts/service-net8.0
+
+      - name: Publish service host net6.0
+        run: >
+          dotnet publish src/DotNet.Yarp.Reverse.Proxy.Gateway.Service
+          -c Release -f net6.0 -p:Version=${{ steps.ver.outputs.version }}
+          -p:DebugType=none -p:DebugSymbols=false
+          -o artifacts/service-net6.0
+
       - name: Package zip
         shell: pwsh
         run: |
@@ -133,6 +162,9 @@ jobs:
           Compress-Archive -Path "artifacts/net10.0/*" -DestinationPath "gateway-net10.0-v$ver.zip"
           Compress-Archive -Path "artifacts/net8.0/*" -DestinationPath "gateway-net8.0-v$ver.zip"
           Compress-Archive -Path "artifacts/net6.0/*" -DestinationPath "gateway-net6.0-v$ver.zip"
+          Compress-Archive -Path "artifacts/service-net10.0/*" -DestinationPath "gateway-service-net10.0-v$ver.zip"
+          Compress-Archive -Path "artifacts/service-net8.0/*" -DestinationPath "gateway-service-net8.0-v$ver.zip"
+          Compress-Archive -Path "artifacts/service-net6.0/*" -DestinationPath "gateway-service-net6.0-v$ver.zip"
           Get-ChildItem -Path *.zip | Select-Object Name, Length
 
       - name: Publish & package nginx.conf converter GUI (self-contained single-file win-x64)
@@ -166,4 +198,7 @@ jobs:
             gateway-net10.0-v${{ steps.ver.outputs.version }}.zip
             gateway-net8.0-v${{ steps.ver.outputs.version }}.zip
             gateway-net6.0-v${{ steps.ver.outputs.version }}.zip
+            gateway-service-net10.0-v${{ steps.ver.outputs.version }}.zip
+            gateway-service-net8.0-v${{ steps.ver.outputs.version }}.zip
+            gateway-service-net6.0-v${{ steps.ver.outputs.version }}.zip
             nginx-config-converter-gui-win-x64-v${{ steps.ver.outputs.version }}.zip

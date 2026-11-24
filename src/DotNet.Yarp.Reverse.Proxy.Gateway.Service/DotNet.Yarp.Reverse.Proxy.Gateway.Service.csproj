@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <!-- 三目标框架与其它项目一致；服务宿主本身不引入条件编译。 -->
+    <TargetFrameworks>net6.0;net8.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- 本宿主由 Windows SCM 拉起，不经 IIS，不需要 web.config。
+         不生成它，发布产物才能与 IIS 产物彻底区分开。 -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 第 3 个（也是唯一新增的）NuGet 包：Windows 服务安装/卸载/启停、健康监控、看门狗。
+         它只依赖 NewLife.Core 12.0.2026.1024，与本项目使用的版本完全一致，不会引起版本漂移。
+         只出现在本宿主项目里——Core 仍是两个包，Hosting 仍是 YARP 一个包。 -->
+    <PackageReference Include="NewLife.Agent" Version="10.18.2026.1024" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 与 Web 宿主共用同一份应用层：管线顺序、配置校验、负载策略、CLI 都不复制。 -->
+    <ProjectReference Include="..\DotNet.Yarp.Reverse.Proxy.Gateway.Hosting\DotNet.Yarp.Reverse.Proxy.Gateway.Hosting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 配置与静态资源与 Web 同源（链接而非复制文件）：
+         运维只维护 Web/appsettings.json 一份，两个宿主的发布产物各自带上，
+         避免"改了 IIS 那份、忘了服务那份"的经典事故。 -->
+    <Content Include="..\DotNet.Yarp.Reverse.Proxy.Gateway.Web\appsettings.json"
+             Link="appsettings.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\DotNet.Yarp.Reverse.Proxy.Gateway.Web\wwwroot\**"
+             Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Agent 的服务元数据与健康阈值。随产物发布，默认关闭自带的 Web 管理面板
+         （面板默认 admin/admin + 占 5580，对公网网关是多余且危险的管理面）。 -->
+    <None Update="Config\Agent.config"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

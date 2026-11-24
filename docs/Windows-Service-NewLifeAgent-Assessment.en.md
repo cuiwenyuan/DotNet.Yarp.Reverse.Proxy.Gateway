@@ -3,14 +3,16 @@
 > Subject: hosting `DotNet.Yarp.Reverse.Proxy.Gateway` as a Windows Service (NewLife.Agent) versus
 > the current IIS + ANCM deployment.
 >
-> Date: 2026-11-23 · Status: **approved, awaiting trigger** · Verdict: **feasible; `NewLife.Agent` approved**
+> Date: 2026-11-23 · Status: **S1 implemented (2026-11-24)** · Verdict: **feasible; `NewLife.Agent` adopted, dual hosts running**
 
 > **Decision update (2026-11-23)**: the third NuGet package `NewLife.Agent` is approved, and the chosen shape is a
 > **standalone host project** — a new `DotNet.Yarp.Reverse.Proxy.Gateway.Service` (Windows Service host) plus a
 > `DotNet.Yarp.Reverse.Proxy.Gateway.Hosting` (shared pipeline assembly), while `Gateway.Core`'s dependency
 > constraint is unchanged. Option A in section 3 ("add the package to `Web` + three-way entry split") is therefore
 > **superseded** by "A': standalone host + shared Hosting". Timing, task breakdown and acceptance criteria live in
-> **[Roadmap](Roadmap.en.md)**. Sections 3/5/6 below keep the original analysis (including its original shape
+> **[Roadmap](Roadmap.en.md)** — **S1 landed on 2026-11-24 and passed dual-host smoke testing**; deployment steps
+> are in the **[Windows Service Deployment Guide](Windows-Service-Deployment.en.md)**.
+> Sections 3/5/6 below keep the original analysis (including its original shape
 > assumption) for traceability; the conclusions and the trap list remain valid.
 
 ---
